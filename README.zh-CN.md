@@ -88,7 +88,7 @@ powershell -File test-ledger-flow.ps1   # 账本集成（需运行中的服务�
 ## 📦 仓库结构
 
 ```
-dsh-usage-meter/
+dsh-usage-meter-harness/
 ├── install.cjs            # ★ 一键安装脚本（只需要你的 DeepSeek Key，可省略）
 ├── patch-config.cjs       # ★ 只插入/更新 usage-meter 配置块（幂等、自动备份、不覆盖其他配置）
 ├── lib/                   # ★ 预构建插件（无需构建）
