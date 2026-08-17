@@ -34,7 +34,7 @@ Built **for DeepSeek** first: it reads your **real account balance** from DeepSe
 ### ⚡ Way 1: One-click script (recommended)
 
 ```bash
-git clone https://github.com/<your-name>/dsh-usage-meter.git && cd dsh-usage-meter
+git clone https://github.com/faith1688/dsh-usage-meter-harness.git && cd dsh-usage-meter
 node install.cjs --key sk-yourDeepSeekKey     # key is OPTIONAL — see below
 ```
 
