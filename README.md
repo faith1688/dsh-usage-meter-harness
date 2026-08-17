@@ -1,4 +1,4 @@
-# dsh-usage-meter
+# dsh-usage-meter-harness
 
 **Real-time DeepSeek API usage & cost meter — tokens, spend and your real balance, right in the chat composer.**
 
