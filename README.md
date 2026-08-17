@@ -88,7 +88,7 @@ powershell -File test-ledger-flow.ps1   # ledger integration (needs a running se
 ## 📦 Repo layout
 
 ```
-dsh-usage-meter/
+dsh-usage-meter-harness/
 ├── install.cjs            # ★ one-click installer (only needs your DeepSeek key, optional)
 ├── patch-config.cjs       # ★ insert/update only the usage-meter config block (idempotent, backs up)
 ├── lib/                   # ★ prebuilt plugin (no build needed)
