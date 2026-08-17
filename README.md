@@ -10,7 +10,8 @@
 
 Built **for DeepSeek** first: it reads your **real account balance** from DeepSeek's official `/user/balance` API (not an estimate), understands DeepSeek's **peak/off-peak (峰谷) time-of-day pricing**, and shows the **cost of every turn** live — without leaving the conversation. Other vendors are covered as **reference billing** (136 bundled models, global balance ledger).
 
-![demo](docs/screenshot-main.png)
+<img width="2328" height="1302" alt="image" src="https://github.com/user-attachments/assets/39bd8e70-ed32-4dc2-abf5-45bf162beb87" />
+
 
 ## 🎯 Highlights
 
