@@ -34,7 +34,7 @@
 ### ⚡ 方式一：一键脚本（推荐）
 
 ```bash
-git clone https://github.com/<你的用户名>/dsh-usage-meter.git && cd dsh-usage-meter
+git clone https://github.com/faith1688/dsh-usage-meter.git && cd dsh-usage-meter
 node install.cjs --key sk-你的DeepSeekKey     # Key 是【可选的】——见下方说明
 ```
 
