@@ -1,0 +1,22 @@
+{
+  "// 说明": "dsh-usage-meter 持久化配置示例（实际文件在 $DSH_HOME/usage-meter.json）。providers=显示币种；priceOverrides=每模型单价覆盖；balances=非 DeepSeek 全局余额账本。",
+  "providers": {
+    "*": { "currency": "CNY" },
+    "openai": { "currency": "USD" },
+    "deepseek-official": { "currency": "CNY" }
+  },
+  "priceOverrides": {
+    "my-gateway/my-model": {
+      "prices": { "inputPerM": 3, "outputPerM": 15, "cacheReadPerM": 0.3, "currency": "CNY" },
+      "rows": [
+        { "label": "输入（缓存命中）", "buckets": ["cacheRead"] },
+        { "label": "输入（缓存未命中）", "buckets": ["input"] },
+        { "label": "输出", "buckets": ["output"] }
+      ]
+    }
+  },
+  "balances": {
+    "p:openai": { "balance": 100, "currency": "USD" },
+    "m:my-gateway/my-model": { "balance": -12.5, "currency": "CNY" }
+  }
+}
