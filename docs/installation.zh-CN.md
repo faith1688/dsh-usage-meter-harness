@@ -30,10 +30,10 @@
 
 ### 第 1 步：拿到插件文件
 
-- 从 GitHub 下载本仓库（Clone 或 Download ZIP），解压后得到一个 `dsh-usage-meter` 文件夹；
+- 从 GitHub 下载本仓库（Clone 或 Download ZIP），解压后得到一个 `dsh-usage-meter-harness` 文件夹；
 - 用终端（命令行）进入这个文件夹：
   ```bash
-  cd dsh-usage-meter
+  cd dsh-usage-meter-harness
   ```
 
 ### 第 2 步：运行安装命令
