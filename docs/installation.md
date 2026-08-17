@@ -29,10 +29,10 @@
 
 ### Step 1: Get the plugin files
 
-- Download this repo from GitHub (Clone or Download ZIP) and unzip it into a `dsh-usage-meter` folder;
+- Download this repo from GitHub (Clone or Download ZIP) and unzip it into a `dsh-usage-meter-harness` folder;
 - Open a terminal and enter the folder:
   ```bash
-  cd dsh-usage-meter
+  cd dsh-usage-meter-harness
   ```
 
 ### Step 2: Run the installer
