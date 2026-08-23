@@ -92,12 +92,14 @@
     "@deepseek-ai/dsh-settings": "^0.1.1-rc.2",
     "@types/node": "^26.2.0",
     "@types/react": "~18.3.1",
+    "esbuild": "^0.28.2",
     "react": "^18.2.0",
     "typescript": "^5.9.3"
   },
   "scripts": {
-    "bundle": "tsc -p tsconfig.build.json",
+    "bundle": "tsc -p tsconfig.build.json && node build-client.mjs",
     "typecheck": "tsc --noEmit",
+    "build:client": "node build-client.mjs",
     "prepare": "npm run bundle",
     "prepack": "npm run bundle"
   }
