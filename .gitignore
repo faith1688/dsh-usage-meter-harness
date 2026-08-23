@@ -1,0 +1,20 @@
+# build output
+# lib/ is committed so the repo is self-contained (npm publish ships it via `files:["lib"]`);
+# `npm run bundle` / `prepack` regenerate it from src/.
+*.tsbuildinfo
+
+# dependencies
+node_modules/
+package-lock.json
+
+# packed npm tarball (regenerate with `npm pack`)
+*.tgz
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/

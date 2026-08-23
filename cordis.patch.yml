@@ -1,0 +1,5 @@
+# @faith1688/dsh-usage-meter-harness bundle patch
+# 单包单插件：装一次即在宿主组合挂载，量体插件（用量/费用/余额）跨会话常驻。
+- insert:
+    - id: usage-meter
+      name: '@faith1688/dsh-usage-meter-harness'
