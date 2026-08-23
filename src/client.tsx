@@ -62,7 +62,7 @@ export function apply(ctx: ClientContext): void {
   // composition without the settings UI simply never runs this effect.
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
-      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => '用量计量' },
+      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => 'dsh-usage-meter' },
       UsageMeterSettingsSection,
     ),
   );
@@ -518,11 +518,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [saveMsg, setSaveMsg] = useState('');
   const [saveOk, setSaveOk] = useState(false);
 
-  const [currency, setCurrency] = useState('CNY');
-  const [budget, setBudget] = useState('');
   const [initialBalance, setInitialBalance] = useState('');
-  const [priceSourceUrl, setPriceSourceUrl] = useState('');
-  const [refreshIntervalMs, setRefreshIntervalMs] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
 
@@ -539,13 +535,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         if (cancelled) return;
         const c = doc.config ?? {};
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
-        const providerCurrency = doc.providers?.['*']?.currency ?? doc.providers?.['deepseek-official']?.currency;
-        const nextCurrency = providerCurrency ?? (typeof c.currency === 'string' && c.currency !== '' ? c.currency : 'CNY');
-        setCurrency(nextCurrency === 'USD' ? 'USD' : 'CNY');
-        setBudget(get(c.budget));
         setInitialBalance(get(c.initialBalance));
-        setPriceSourceUrl(get(c.priceSourceUrl));
-        setRefreshIntervalMs(get(c.refreshIntervalMs));
         setKeySaved(c.deepseekApiKey === '***');
       } catch (err) {
         if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
@@ -577,13 +567,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setSaving(true);
     try {
       const patch: Record<string, unknown> = {};
-      if (budget.trim() !== '') { const n = Number(budget); if (!Number.isNaN(n) && n >= 0) patch.budget = n; }
       if (initialBalance.trim() !== '') { const n = Number(initialBalance); if (!Number.isNaN(n) && n >= 0) patch.initialBalance = n; }
-      if (priceSourceUrl.trim() !== '') patch.priceSourceUrl = priceSourceUrl.trim();
-      if (refreshIntervalMs.trim() !== '') { const ms = Number(refreshIntervalMs); if (!Number.isNaN(ms) && ms > 0) patch.refreshIntervalMs = ms; }
       if (apiKey.trim() !== '' && apiKey !== '***') patch.deepseekApiKey = apiKey.trim();
       patch.provider = '*';
-      patch.currency = currency;
       const res = await fetch('/api/usage-meter/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
       if (res.ok) {
         setSaveOk(true); setSaveMsg('已保存'); setKeySaved(apiKey.trim() !== '' ? true : keySaved);
@@ -598,9 +584,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
 
   return (
     <div style={{ padding: '16px 24px 24px', fontSize: 13, color: t.text }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>用量计量</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>dsh-usage-meter</h2>
       <p style={{ color: t.text3, fontSize: 12, margin: '0 0 12px' }}>
-        币种、预算、价格源与 DeepSeek 余额 API Key 等全局设置。单价与峰谷计费请在会话的用量卡片中编辑。
+        DeepSeek 用量计量 · 全局设置。单价与峰谷计费请在「会话 · 用量卡片 → 用户自定义设置」中编辑。
       </p>
       {loadError !== '' && (
         <div style={{ marginBottom: 12, padding: '8px 10px', border: `1px solid ${t.error}`, borderRadius: 6, color: t.error, fontSize: 12 }}>{loadError}</div>
@@ -610,27 +596,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       ) : (
         <div>
           <div style={field}>
-            <label style={label} htmlFor="um-currency">全局币种</label>
-            <select id="um-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} style={select}>
-              <option value="CNY">CNY（人民币）</option>
-              <option value="USD">USD（美元）</option>
-            </select>
-          </div>
-          <div style={field}>
-            <label style={label} htmlFor="um-budget">每会话预算</label>
-            <input id="um-budget" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={`如 100 (${currency === 'USD' ? '$' : '¥'})/会话`} style={input} />
-          </div>
-          <div style={field}>
             <label style={label} htmlFor="um-init">非 DeepSeek 初始余额</label>
-            <input id="um-init" value={initialBalance} onChange={(e) => setInitialBalance(e.target.value)} placeholder={`如 100 (${currency === 'USD' ? '$' : '¥'})`} style={input} />
-          </div>
-          <div style={field}>
-            <label style={label} htmlFor="um-url">远端价格源 URL</label>
-            <input id="um-url" value={priceSourceUrl} onChange={(e) => setPriceSourceUrl(e.target.value)} placeholder="https://…/model_prices_and_context_window.json" style={input} />
-          </div>
-          <div style={field}>
-            <label style={label} htmlFor="um-int">刷新间隔（毫秒）</label>
-            <input id="um-int" value={refreshIntervalMs} onChange={(e) => setRefreshIntervalMs(e.target.value.replace(/\D/g, ''))} placeholder="默认 14400000（4 小时）" style={input} />
+            <input id="um-init" value={initialBalance} onChange={(e) => setInitialBalance(e.target.value)} placeholder="如 100（CNY）" style={input} />
           </div>
           <div style={field}>
             <label style={label} htmlFor="um-key">DeepSeek API Key</label>
