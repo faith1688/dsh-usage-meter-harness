@@ -567,6 +567,10 @@ type ModelEditorState = {
   peakOn: boolean;
   days: number[];
   windowText: string;
+  /** Billing-template-driven modes. */
+  templateId: string;
+  combined: boolean;
+  discount: string;
   /** True when this is a DeepSeek official model shown pre-filled with known defaults. */
   prefillOfficial?: boolean;
   /** True when this model has no saved price and is not a DeepSeek official model. */
@@ -626,6 +630,9 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
     days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : OFFICIAL_DAYS,
     windowText: formatPeakWindows(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
+    templateId: pe !== undefined ? matchTypeId(pe as unknown as Parameters<typeof matchTypeId>[0]) : '',
+    combined: pe?.combinedPerM !== undefined,
+    discount: typeof pe?.discount === 'number' && (pe!.discount as number) < 1 ? String(pe!.discount as number) : '',
     // whether this is a fresh official model shown with known defaults (→ show
     // a friendly "已按官方价预填，可修改后保存" hint) vs a non-official model
     // with no saved price (→ prompt the user to fill it in).
@@ -655,6 +662,18 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [saveStates, setSaveStates] = useState<Record<string, ModelSaveState>>({});
   const [savingAll, setSavingAll] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ id: string; label: string; rows: BillingRow[]; mode: string; peak?: boolean; note?: string }>>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/usage-meter/templates');
+        if (!res.ok) return;
+        const doc = (await res.json()) as { types?: Array<{ id: string; label: string; rows: BillingRow[]; mode: string; peak?: boolean; note?: string }> };
+        if (doc.types) setTemplates(doc.types);
+      } catch { /* templates optional */ }
+    })();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -753,6 +772,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       const wins = parsePeakWindowsText(e.windowText);
       if (wins.length > 0) prices.peakWindows = wins;
     }
+    if (e.combined) {
+      const c = num(e.input);
+      if (c !== undefined) { prices.combinedPerM = c; prices.inputPerM = c; prices.outputPerM = c; }
+    }
+    const disc = num(e.discount);
+    if (disc !== undefined && disc > 0 && disc < 1) prices.discount = disc;
     if (e.currency !== 'CNY' && e.currency !== '') prices.currency = e.currency;
     const body: Record<string, unknown> = { provider, model, prices };
     const bal = num(e.balance);
@@ -1011,6 +1036,34 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     </label>
                                   )}
                                 </div>
+                                {templates.length > 0 && (
+                                  <label style={field} htmlFor={`um-tpl-${k}`}>
+                                    <span style={{ fontSize: 12, color: t.text2 }}>计费模板</span>
+                                    <select id={`um-tpl-${k}`} value={e.templateId}
+                                      onChange={(ev) => {
+                                        const tpl = templates.find((tp) => tp.id === ev.target.value);
+                                        setEdits((s) => ({ ...s, [k]: { ...e,
+                                          templateId: ev.target.value,
+                                          combined: tpl?.mode === 'combined',
+                                          discount: tpl?.mode === 'keep' ? '0.5' : '',
+                                          peakOn: tpl?.peak === true,
+                                        } }));
+                                      }}
+                                      style={{ ...select, maxWidth: 240, fontSize: 12, padding: '3px 6px' }}>
+                                      <option value="">（自定义）</option>
+                                      {templates.map((tp) => <option key={tp.id} value={tp.id}>{tp.label}</option>)}
+                                    </select>
+                                  </label>
+                                )}
+                                {e.combined && <div style={{ fontSize: 11, color: t.text2 }}>合并计价：输入单价即对全部 token 统一计费（缓存/输出合并）。</div>}
+                                {e.discount !== '' && (
+                                  <label style={field} htmlFor={`um-disc-${k}`}>
+                                    <span style={{ fontSize: 12, color: t.text2 }}>Batch 折扣</span>
+                                    <input id={`um-disc-${k}`} value={e.discount}
+                                      onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, discount: ev.target.value } }))}
+                                      placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
+                                  </label>
+                                )}
                                 <div>
                                   <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>基础单价（元/M 或 $/M）</div>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
