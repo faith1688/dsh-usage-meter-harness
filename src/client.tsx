@@ -503,7 +503,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
             </div>
           )}
 
-          <SettingsSection usage={usage} />
+          {/* 单价/模板编辑已迁移到「设置 → 用量计量 → 供应商定价管理」，弹窗只做显示。 */}
         </div>
       )}
     </div>
