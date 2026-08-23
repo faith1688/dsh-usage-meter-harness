@@ -21,6 +21,24 @@ import type { CSSProperties, ReactElement } from 'react';
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'; // SlotMap merge for the dock seat
+
+/**
+ * Slot contract for the sidebar settings page. The canonical declaration lives
+ * in `@deepseek-ai/dsh-client-ui-settings` (the shell's settings base package),
+ * which this plugin program does not import; the SlotMap merge below is
+ * structurally identical to that declaration (list/root, owner `close`), and
+ * declaration merging is additive — the shell's real declaration wins at
+ * runtime composition.
+ */
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'settings.section': {
+      kind: 'list';
+      scope: 'root';
+      owner: { close: () => void };
+    };
+  }
+}
 import { costBreakdown } from './projection.ts';
 import type { BillingRow, ModelPricing, UsageCostValue } from './projection.ts';
 import { matchTypeId } from './billing.ts';
@@ -37,6 +55,15 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.register(
       { name: 'conversation.composer.dock', id: 'usage-meter.readout', order: 20 },
       UsageReadout,
+    ),
+  );
+  // Settings panel: register a full-page section in the left sidebar nav.
+  // slots.inject gates the registration on the shell declaring the slot, so a
+  // composition without the settings UI simply never runs this effect.
+  ctx.slots.inject('settings.section', () =>
+    ctx.slots.register(
+      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => '用量计量' },
+      UsageMeterSettingsSection,
     ),
   );
 }
@@ -477,6 +504,165 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
           )}
 
           <SettingsSection usage={usage} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── settings panel page (full page in the left sidebar) ──────────────────────
+function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
+  const [saveOk, setSaveOk] = useState(false);
+
+  const [currency, setCurrency] = useState('CNY');
+  const [budget, setBudget] = useState('');
+  const [initialBalance, setInitialBalance] = useState('');
+  const [priceSourceUrl, setPriceSourceUrl] = useState('');
+  const [refreshIntervalMs, setRefreshIntervalMs] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [keySaved, setKeySaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/usage-meter/config');
+        if (!res.ok) { setLoadError(`加载失败 (${res.status})`); return; }
+        const doc = (await res.json()) as {
+          config?: Record<string, unknown>;
+          providers?: Record<string, { currency?: string }>;
+        };
+        if (cancelled) return;
+        const c = doc.config ?? {};
+        const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+        const providerCurrency = doc.providers?.['*']?.currency ?? doc.providers?.['deepseek-official']?.currency;
+        const nextCurrency = providerCurrency ?? (typeof c.currency === 'string' && c.currency !== '' ? c.currency : 'CNY');
+        setCurrency(nextCurrency === 'USD' ? 'USD' : 'CNY');
+        setBudget(get(c.budget));
+        setInitialBalance(get(c.initialBalance));
+        setPriceSourceUrl(get(c.priceSourceUrl));
+        setRefreshIntervalMs(get(c.refreshIntervalMs));
+        setKeySaved(c.deepseekApiKey === '***');
+      } catch (err) {
+        if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 0' };
+  const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 120 };
+  const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+  const select: CSSProperties = { padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+
+  const msToReadable = (ms: string): string => {
+    const n = Number(ms);
+    if (Number.isNaN(n) || n <= 0) return ms;
+    return n >= 86400000 ? `${Math.round(n / 86400000)} 天` : n >= 3600000 ? `${Math.round(n / 3600000)} 小时` : n >= 60000 ? `${Math.round(n / 60000)} 分钟` : `${Math.round(n / 1000)} 秒`;
+  };
+  const readableToMs = (s: string): number => {
+    const m = /^\s*(\d+)\s*(秒|分钟|小时|天)\s*$/.exec(s);
+    if (m) { const k = Number(m[1]); const [unit] = m.slice(2); const mult = unit === '秒' ? 1000 : unit === '分钟' ? 60000 : unit === '小时' ? 3600000 : 86400000; return k * mult; }
+    const n = Number(s);
+    return Number.isNaN(n) ? 0 : n;
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const patch: Record<string, unknown> = {};
+      if (budget.trim() !== '') { const n = Number(budget); if (!Number.isNaN(n) && n >= 0) patch.budget = n; }
+      if (initialBalance.trim() !== '') { const n = Number(initialBalance); if (!Number.isNaN(n) && n >= 0) patch.initialBalance = n; }
+      if (priceSourceUrl.trim() !== '') patch.priceSourceUrl = priceSourceUrl.trim();
+      if (refreshIntervalMs.trim() !== '') { const ms = Number(refreshIntervalMs); if (!Number.isNaN(ms) && ms > 0) patch.refreshIntervalMs = ms; }
+      if (apiKey.trim() !== '' && apiKey !== '***') patch.deepseekApiKey = apiKey.trim();
+      patch.provider = '*';
+      patch.currency = currency;
+      const res = await fetch('/api/usage-meter/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+      if (res.ok) {
+        setSaveOk(true); setSaveMsg('已保存'); setKeySaved(apiKey.trim() !== '' ? true : keySaved);
+      } else { setSaveOk(false); setSaveMsg(`保存失败 (${res.status})`); }
+    } catch (err) {
+      console.warn('[usage-meter] save config failed', err);
+      setSaveOk(false); setSaveMsg('保存失败');
+    }
+    setSaving(false);
+    window.setTimeout(() => { setSaveMsg(''); setSaveOk(false); }, 2500);
+  };
+
+  return (
+    <div style={{ padding: '16px 24px 24px', fontSize: 13, color: t.text }}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>用量计量</h2>
+      <p style={{ color: t.text3, fontSize: 12, margin: '0 0 12px' }}>
+        币种、预算、价格源与 DeepSeek 余额 API Key 等全局设置。单价与峰谷计费请在会话的用量卡片中编辑。
+      </p>
+      {loadError !== '' && (
+        <div style={{ marginBottom: 12, padding: '8px 10px', border: `1px solid ${t.error}`, borderRadius: 6, color: t.error, fontSize: 12 }}>{loadError}</div>
+      )}
+      {loading ? (
+        <div style={{ color: t.text3, fontSize: 13 }}>加载全局配置…</div>
+      ) : (
+        <div>
+          <div style={field}>
+            <label style={label} htmlFor="um-currency">全局币种</label>
+            <select id="um-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} style={select}>
+              <option value="CNY">CNY（人民币）</option>
+              <option value="USD">USD（美元）</option>
+            </select>
+          </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-budget">每会话预算</label>
+            <input id="um-budget" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={`如 100 (${currency === 'USD' ? '$' : '¥'})/会话`} style={input} />
+          </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-init">非 DeepSeek 初始余额</label>
+            <input id="um-init" value={initialBalance} onChange={(e) => setInitialBalance(e.target.value)} placeholder={`如 100 (${currency === 'USD' ? '$' : '¥'})`} style={input} />
+          </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-url">远端价格源 URL</label>
+            <input id="um-url" value={priceSourceUrl} onChange={(e) => setPriceSourceUrl(e.target.value)} placeholder="https://…/model_prices_and_context_window.json" style={input} />
+          </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-int">刷新间隔（毫秒）</label>
+            <input id="um-int" value={refreshIntervalMs} onChange={(e) => setRefreshIntervalMs(e.target.value.replace(/\D/g, ''))} placeholder="默认 14400000（4 小时）" style={input} />
+          </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-key">DeepSeek API Key</label>
+            <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 320, alignItems: 'center' }}>
+              {keySaved ? (
+                <span style={{ padding: '4px 8px', borderRadius: 6, background: 'rgba(22, 163, 74, 0.10)', color: t.ok, fontSize: 12, whiteSpace: 'nowrap' }}>已保存</span>
+              ) : (
+                <span style={{ color: t.text3, fontSize: 12, whiteSpace: 'nowrap' }}>未配置</span>
+              )}
+              <input
+                id="um-key"
+                value={apiKey}
+                onChange={(e) => { setApiKey(e.target.value); }}
+                placeholder={keySaved ? '留空保留当前 Key；填写以覆盖' : '如 sk-…'}
+                autoComplete="off"
+                style={{ ...input, maxWidth: 200 }}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: `1px solid ${t.border}`, background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+            {saveMsg !== '' && (
+              <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
+                {saveMsg}{saveOk && apiKey.trim() !== '' ? ' · 已更新 API Key' : ''}
+              </span>
+            )}
+          </div>
+          <p style={{ color: t.text3, fontSize: 11, marginTop: 12, marginBottom: 0 }}>
+            会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。
+          </p>
         </div>
       )}
     </div>
