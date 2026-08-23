@@ -567,13 +567,41 @@ type ModelEditorState = {
   peakOn: boolean;
   days: number[];
   windowText: string;
+  /** True when this is a DeepSeek official model shown pre-filled with known defaults. */
+  prefillOfficial?: boolean;
+  /** True when this model has no saved price and is not a DeepSeek official model. */
+  noSavedPrice?: boolean;
 };
+
+/** Known DeepSeek OFFICIAL prices (CNY / 1M tokens), used to pre-fill a fresh
+ *  official model the user has not overridden yet. weekday peak = Mon-Fri
+ *  9:00-12:00 & 14:00-18:00 Beijing; weekend bills at offPeak (flat). */
+type OfficialRow = {
+  inputPerM: number; cacheReadPerM: number; outputPerM: number;
+  peak: { inputPerM: number; cacheReadPerM: number; outputPerM: number };
+  offPeak: { inputPerM: number; cacheReadPerM: number; outputPerM: number };
+};
+const OFFICIAL: Record<string, OfficialRow> = {
+  'deepseek-v4-flash': { inputPerM: 1, cacheReadPerM: 0.02, outputPerM: 2, peak: { inputPerM: 3, cacheReadPerM: 0.1, outputPerM: 9 }, offPeak: { inputPerM: 1.5, cacheReadPerM: 0.05, outputPerM: 4.5 } },
+  'deepseek-v4-flash-vision-exp': { inputPerM: 1, cacheReadPerM: 0.02, outputPerM: 2, peak: { inputPerM: 3, cacheReadPerM: 0.1, outputPerM: 9 }, offPeak: { inputPerM: 1.5, cacheReadPerM: 0.05, outputPerM: 4.5 } },
+  'deepseek-v4-pro': { inputPerM: 3, cacheReadPerM: 0.025, outputPerM: 6, peak: { inputPerM: 9, cacheReadPerM: 0.3, outputPerM: 27 }, offPeak: { inputPerM: 4.5, cacheReadPerM: 0.15, outputPerM: 13.5 } },
+  'deepseek-chat': { inputPerM: 1, cacheReadPerM: 0.02, outputPerM: 2, peak: { inputPerM: 3, cacheReadPerM: 0.1, outputPerM: 9 }, offPeak: { inputPerM: 1.5, cacheReadPerM: 0.05, outputPerM: 4.5 } },
+  'deepseek-reasoner': { inputPerM: 3, cacheReadPerM: 0.1, outputPerM: 6, peak: { inputPerM: 9, cacheReadPerM: 0.3, outputPerM: 27 }, offPeak: { inputPerM: 4.5, cacheReadPerM: 0.15, outputPerM: 13.5 } },
+};
+const OFFICIAL_DAYS = [1, 2, 3, 4, 5];
+const OFFICIAL_WINDOWS: Array<{ start: number; end: number }> = [{ start: 540, end: 720 }, { start: 840, end: 1080 }];
 
 /** Seed one model's editor state from the stored override (flat or peak-tiered),
  *  the balance ledger (model entry → provider entry), and stored days/windows —
- *  defaulting to workdays + 9-12 · 14-18 like the rest of the meter. */
+ *  defaulting to workdays + 9-12 · 14-18 like the rest of the meter. When a
+ *  DeepSeek OFFICIAL model has no saved override, pre-fill the KNOWN official
+ *  prices & peak schedule so the user is not facing empty fields. */
 function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: BalancesDoc): ModelEditorState {
-  const pe = ov[key]?.prices as Record<string, unknown> | undefined;
+  const provider = key.split('/')[0];
+  const model = key.slice(provider.length + 1);
+  const official = isDeepseekRoute(provider) ? OFFICIAL[model] : undefined;
+  const savedPe = ov[key]?.prices as Record<string, unknown> | undefined;
+  const pe = savedPe ?? ((official ?? undefined) as Record<string, unknown> | undefined);
   const n = (v: unknown): string => (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
   const tier = (v: unknown): { ip: string; cp: string; op: string } => {
     if (v === null || typeof v !== 'object') return { ip: '', cp: '', op: '' };
@@ -585,10 +613,9 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
   const flatOutput = n(pe?.outputPerM);
   const peak = tier(pe?.peak);
   const off = tier(pe?.offPeak);
-  const provider = key.split('/')[0];
-  const model = key.slice(provider.length + 1);
   const hasBal = (v: { balance?: number; currency?: string } | undefined) => v !== undefined && typeof v.balance === 'number';
   const bal = hasBal(bals[`m:${provider}/${model}`]) ? bals[`m:${provider}/${model}`] : hasBal(bals[`p:${provider}`]) ? bals[`p:${provider}`] : undefined;
+  const savedOverride = ov[key]?.prices !== undefined;
   return {
     input: flatInput, cache: flatCache, output: flatOutput,
     inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
@@ -597,8 +624,13 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     currency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
     balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
     peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
-    days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : [1, 2, 3, 4, 5],
-    windowText: formatPeakWindows(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : [{ start: 540, end: 720 }, { start: 840, end: 1080 }]),
+    days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : OFFICIAL_DAYS,
+    windowText: formatPeakWindows(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
+    // whether this is a fresh official model shown with known defaults (→ show
+    // a friendly "已按官方价预填，可修改后保存" hint) vs a non-official model
+    // with no saved price (→ prompt the user to fill it in).
+    prefillOfficial: official !== undefined && !savedOverride,
+    noSavedPrice: !savedOverride && official === undefined,
   };
 }
 
@@ -965,6 +997,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             {/* 展开体 */}
                             {isOpen && (
                               <div style={{ padding: '4px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {e.prefillOfficial && (
+                                  <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>已按 DeepSeek 官方价预填：周一至五 9:00–12:00、14:00–18:00 为峰价，周六/周日按谷价；可修改后保存。</div>
+                                )}
+                                {e.noSavedPrice && (
+                                  <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>该模型尚未配置价格与余额：请在下方填写单价/余额后点「保存单价」，否则该模型用量金额可能按 0 计。</div>
+                                )}
                                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
                                   <label style={field} htmlFor={`um-cur-${k}`}>
                                     <span style={{ fontSize: 12, color: t.text2 }}>币种</span>
