@@ -37,11 +37,25 @@ export function isPeakHour(utcHour: number): boolean {
   return (utcHour >= 1 && utcHour < 4) || (utcHour >= 6 && utcHour < 10);
 }
 
-/** Resolve one pricing row to the rate active at `now` (peak/off-peak when applicable). */
+/** Resolve one pricing row to the rate active at `now` (peak/off-peak when applicable).
+ *
+ * Weekday-aware (BEIJING day & hour): if the current BEIJING weekday is in
+ * `pricing.peakDays`, the peak/off-peak windows (BEIJING hours) apply; a day
+ * NOT in `peakDays` (e.g. Sat/Sun) is billed flat with `weekend ?? offPeak`.
+ */
 export function resolvePricingForTime(pricing: ModelPricing, now: number): ModelPricing {
   if (pricing.peak === undefined || pricing.offPeak === undefined) return pricing;
   if (pricing.peakOffPeakFrom !== undefined && now < pricing.peakOffPeakFrom) return pricing;
-  const active = isPeakHour(new Date(now).getUTCHours()) ? pricing.peak : pricing.offPeak;
+  const beijing = new Date(now + 8 * 3600 * 1000);
+  const bjDay = beijing.getUTCDay();
+  const bjHour = beijing.getUTCHours();
+  const days = pricing.peakDays ?? [0, 1, 2, 3, 4, 5, 6];
+  const windows = pricing.peakWindows ?? [{ start: 9, end: 12 }, { start: 14, end: 18 }];
+  const active = days.includes(bjDay)
+    ? windows.some((w) => bjHour >= w.start && bjHour < w.end)
+      ? pricing.peak
+      : pricing.offPeak
+    : (pricing.weekend ?? pricing.offPeak);
   return {
     ...pricing,
     inputPerM: active.inputPerM,

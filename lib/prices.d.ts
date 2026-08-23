@@ -3,7 +3,12 @@ import type { ModelPricing } from './projection.ts';
 export type PriceKey = `${string}/${string}`;
 /** DeepSeek domestic peak hours (UTC 1-4 & 6-10 = Beijing 9-12 & 14-18). */
 export declare function isPeakHour(utcHour: number): boolean;
-/** Resolve one pricing row to the rate active at `now` (peak/off-peak when applicable). */
+/** Resolve one pricing row to the rate active at `now` (peak/off-peak when applicable).
+ *
+ * Weekday-aware (BEIJING day & hour): if the current BEIJING weekday is in
+ * `pricing.peakDays`, the peak/off-peak windows (BEIJING hours) apply; a day
+ * NOT in `peakDays` (e.g. Sat/Sun) is billed flat with `weekend ?? offPeak`.
+ */
 export declare function resolvePricingForTime(pricing: ModelPricing, now: number): ModelPricing;
 /**
  * A sparse price table keyed by `provider/model`. Lookup tries the exact key,

@@ -299,7 +299,11 @@ function underlyingProvider(provider: string | null): string | null {
 
 function isDeepSeekProvider(provider: string | null): boolean {
   const real = underlyingProvider(provider);
-  return real === 'deepseek' || real === 'deepseek-official';
+  if (real === null) return false;
+  // Match the canonical names as well as any `deepseek-*` route (e.g. a model
+  // id used as the provider, like `deepseek-v4-flash-vision-exp`) so the
+  // official account balance is surfaced for every DeepSeek route.
+  return real === 'deepseek' || real === 'deepseek-official' || real.startsWith('deepseek');
 }
 
 function bucketsOf(usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } | undefined) {
@@ -362,6 +366,9 @@ const pricingSchema = zod
     peak: peakRatesSchema.optional(),
     offPeak: peakRatesSchema.optional(),
     peakOffPeakFrom: zod.number().optional(),
+    peakDays: zod.array(zod.number().int().min(0).max(6)).optional(),
+    peakWindows: zod.array(zod.object({ start: zod.number(), end: zod.number() })).optional(),
+    weekend: peakRatesSchema.optional(),
   })
   .strict();
 const turnCostSchema = zod

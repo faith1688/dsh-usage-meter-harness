@@ -19,6 +19,12 @@ export interface PricingRow {
     peak?: { inputPerM: number; outputPerM: number; cacheReadPerM?: number } | null;
     offPeak?: { inputPerM: number; outputPerM: number; cacheReadPerM?: number } | null;
     peakOffPeakFrom?: number;
+    /** Beijing weekdays (0=Sun..6=Sat) with peak/off-peak split; days not listed are flat. */
+    peakDays?: number[];
+    /** Peak-hour windows in Beijing hours [0,24). */
+    peakWindows?: Array<{ start: number; end: number }>;
+    /** Flat rate for days not in peakDays (weekend); falls back to offPeak. */
+    weekend?: { inputPerM: number; outputPerM: number; cacheReadPerM?: number } | null;
     currency?: string;
     source?: 'bundled' | 'remote' | 'user';
 }
@@ -75,6 +81,8 @@ export const BUNDLED_TABLE: Record<string, PricingRow> = {
         peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 },
         offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05 },
         peakOffPeakFrom: DEEPSEEK_PEAK_OFF_PEAK_FROM,
+        peakDays: [1, 2, 3, 4, 5],
+        peakWindows: [{ start: 9, end: 12 }, { start: 14, end: 18 }],
         currency: 'CNY',
         source: 'bundled',
     },
@@ -85,6 +93,8 @@ export const BUNDLED_TABLE: Record<string, PricingRow> = {
         peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3 },
         offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15 },
         peakOffPeakFrom: DEEPSEEK_PEAK_OFF_PEAK_FROM,
+        peakDays: [1, 2, 3, 4, 5],
+        peakWindows: [{ start: 9, end: 12 }, { start: 14, end: 18 }],
         currency: 'CNY',
         source: 'bundled',
     },
@@ -96,6 +106,8 @@ export const BUNDLED_TABLE: Record<string, PricingRow> = {
         peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 },
         offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05 },
         peakOffPeakFrom: DEEPSEEK_PEAK_OFF_PEAK_FROM,
+        peakDays: [1, 2, 3, 4, 5],
+        peakWindows: [{ start: 9, end: 12 }, { start: 14, end: 18 }],
         currency: 'CNY',
         source: 'bundled',
     },
@@ -107,6 +119,8 @@ export const BUNDLED_TABLE: Record<string, PricingRow> = {
         peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 },
         offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05 },
         peakOffPeakFrom: DEEPSEEK_PEAK_OFF_PEAK_FROM,
+        peakDays: [1, 2, 3, 4, 5],
+        peakWindows: [{ start: 9, end: 12 }, { start: 14, end: 18 }],
         currency: 'CNY',
         source: 'bundled',
     },
@@ -117,6 +131,8 @@ export const BUNDLED_TABLE: Record<string, PricingRow> = {
         peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3 },
         offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15 },
         peakOffPeakFrom: DEEPSEEK_PEAK_OFF_PEAK_FROM,
+        peakDays: [1, 2, 3, 4, 5],
+        peakWindows: [{ start: 9, end: 12 }, { start: 14, end: 18 }],
         currency: 'CNY',
         source: 'bundled',
     },

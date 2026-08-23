@@ -188,6 +188,16 @@ declare const usageCostProjection: {
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
+                peakDays: zod.ZodOptional<zod.ZodArray<zod.ZodNumber>>;
+                peakWindows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                    start: zod.ZodNumber;
+                    end: zod.ZodNumber;
+                }, zod.core.$strip>>>;
+                weekend: zod.ZodOptional<zod.ZodObject<{
+                    inputPerM: zod.ZodNumber;
+                    outputPerM: zod.ZodNumber;
+                    cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
+                }, zod.core.$strict>>;
             }, zod.core.$strict>>;
             basePricing: zod.ZodNullable<zod.ZodObject<{
                 inputPerM: zod.ZodNumber;
@@ -214,6 +224,16 @@ declare const usageCostProjection: {
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
+                peakDays: zod.ZodOptional<zod.ZodArray<zod.ZodNumber>>;
+                peakWindows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                    start: zod.ZodNumber;
+                    end: zod.ZodNumber;
+                }, zod.core.$strip>>>;
+                weekend: zod.ZodOptional<zod.ZodObject<{
+                    inputPerM: zod.ZodNumber;
+                    outputPerM: zod.ZodNumber;
+                    cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
+                }, zod.core.$strict>>;
             }, zod.core.$strict>>;
             priceRows: zod.ZodArray<zod.ZodObject<{
                 label: zod.ZodString;
@@ -250,6 +270,16 @@ declare const usageCostProjection: {
                         cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     }, zod.core.$strict>>;
                     peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
+                    peakDays: zod.ZodOptional<zod.ZodArray<zod.ZodNumber>>;
+                    peakWindows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                        start: zod.ZodNumber;
+                        end: zod.ZodNumber;
+                    }, zod.core.$strip>>>;
+                    weekend: zod.ZodOptional<zod.ZodObject<{
+                        inputPerM: zod.ZodNumber;
+                        outputPerM: zod.ZodNumber;
+                        cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
+                    }, zod.core.$strict>>;
                 }, zod.core.$strict>;
                 rows: zod.ZodArray<zod.ZodObject<{
                     label: zod.ZodString;

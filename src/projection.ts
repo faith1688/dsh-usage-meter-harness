@@ -42,6 +42,15 @@ export interface ModelPricing {
   offPeak?: PeakRates;
   /** Epoch ms from which peak/off-peak pricing applies (before it, base rates). */
   peakOffPeakFrom?: number;
+  /**
+   * Beijing weekday numbers (0=Sun .. 6=Sat) on which peak/off-peak splitting
+   * applies; days NOT listed (e.g. Sat/Sun) are billed flat. Omit → all 7 days split.
+   */
+  peakDays?: number[];
+  /** Peak-hour windows in BEIJING hours [0,24); e.g. [{start:9,end:12},{start:14,end:18}]. */
+  peakWindows?: Array<{ start: number; end: number }>;
+  /** Flat per-token rate for days NOT in `peakDays` (weekend); falls back to `offPeak` when absent. */
+  weekend?: PeakRates;
   /** Billing currency, e.g. `CNY` / `USD`. */
   currency?: string;
   /** Epoch ms when this price was last refreshed. */

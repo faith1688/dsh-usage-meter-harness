@@ -26,6 +26,19 @@ export interface PricingRow {
         cacheReadPerM?: number;
     } | null;
     peakOffPeakFrom?: number;
+    /** Beijing weekdays (0=Sun..6=Sat) with peak/off-peak split; days not listed are flat. */
+    peakDays?: number[];
+    /** Peak-hour windows in Beijing hours [0,24). */
+    peakWindows?: Array<{
+        start: number;
+        end: number;
+    }>;
+    /** Flat rate for days not in peakDays (weekend); falls back to offPeak. */
+    weekend?: {
+        inputPerM: number;
+        outputPerM: number;
+        cacheReadPerM?: number;
+    } | null;
     currency?: string;
     source?: 'bundled' | 'remote' | 'user';
 }
