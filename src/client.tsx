@@ -658,6 +658,20 @@ function PriceEditor({
   const [typeNote, setTypeNote] = useState('');
   const [msg, setMsg] = useState('');
   const [justReset, setJustReset] = useState(false);
+  // Editable off-peak (谷价) per bucket; empty = derive from peak×0.5 on save.
+  const [offPeakPrices, setOffPeakPrices] = useState<string[]>(() =>
+    peakMode
+      ? rows.map((r) => {
+          const b = r.buckets[0] ?? 'input';
+          const v = peakPricePerM(base!.offPeak, b) ?? bucketPricePerM(base, b);
+          return v === undefined ? '' : String(v);
+        })
+      : [],
+  );
+  // Peak/off-peak schedule: which Beijing weekdays split + the peak-hour windows.
+  const [peakDays, setPeakDays] = useState<number[]>(() => base?.peakDays ?? [1, 2, 3, 4, 5]);
+  const [peakWindows, setPeakWindows] = useState<Array<{ start: number; end: number }>>(() => base?.peakWindows ?? [{ start: 9, end: 12 }, { start: 14, end: 18 }]);
+  const [windowText, setWindowText] = useState(() => (base?.peakWindows ?? [{ start: 9, end: 12 }, { start: 14, end: 18 }]).map((w) => `${w.start}-${w.end}`).join(', '));
   const sym = currency === 'USD' ? '$' : '¥';
 
   useEffect(() => {
@@ -748,16 +762,23 @@ function PriceEditor({
       const peak: Record<string, number> = {};
       const offPeak: Record<string, number> = {};
       rowsState.forEach((r, i) => {
-        const raw = (prices[i] ?? '').trim();
-        const v = Number(raw);
-        if (raw === '' || Number.isNaN(v) || v < 0) return;
         const key = bucketPriceKey(r.buckets[0] ?? 'input');
-        peak[key] = v;
-        offPeak[key] = v * 0.5;
+        const pvRaw = (prices[i] ?? '').trim();
+        const pv = Number(pvRaw);
+        if (pvRaw !== '' && !Number.isNaN(pv) && pv >= 0) peak[key] = pv;
+        const offRaw = ((offPeakPrices[i] ?? '') as string).trim();
+        const ov = Number(offRaw);
+        if (offRaw === '') { if (!Number.isNaN(pv) && pv >= 0) offPeak[key] = pv * 0.5; }
+        else if (!Number.isNaN(ov) && ov >= 0) offPeak[key] = ov;
       });
       if (Object.keys(peak).length > 0) {
         pricePatch.peak = peak as unknown as number;
         pricePatch.offPeak = offPeak as unknown as number;
+        pricePatch.peakDays = [...peakDays] as unknown as number;
+        pricePatch.peakWindows = windowText.split(',').map((s) => {
+          const m = /^\s*(\d{1,2})\s*-\s*(\d{1,2})\s*$/.exec(s);
+          return m ? { start: Number(m[1]), end: Number(m[2]) } : null;
+        }).filter((x): x is { start: number; end: number } => x !== null) as unknown as number;
       }
     }
     pricePatch.currency = currency as unknown as number;
@@ -828,8 +849,9 @@ function PriceEditor({
       <div style={{ ...row, paddingBottom: 2, color: t.text3, fontSize: 10 }}>
         <span style={{ flex: 1 }}>用量名称（可改）</span>
         <span style={{ width: 86, textAlign: 'right' }}>{billing.peak ? '高峰价（可改）' : '单价（可改）'}</span>
+        {billing.peak && <span style={{ width: 86, textAlign: 'right' }}>谷价（可改）</span>}
       </div>
-      {billing.peak && <div style={{ color: t.text3, fontSize: 10, marginBottom: 2 }}>闲时单价自动 = 高峰 ×0.5（高峰时段 9-12 / 14-18 北京时间）</div>}
+      {billing.peak && <div style={{ color: t.text3, fontSize: 10, marginBottom: 2 }}>谷价留空 = 高峰×0.5；高峰时段默认周一到周五 9-12 / 14-18（北京时间），可在下方修改；周六周日全天按谷价</div>}
 
       {rowsState.map((r, i) => (
         <div key={r.buckets.join(',')} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -844,8 +866,40 @@ function PriceEditor({
             placeholder={`如 ${bucketPricePerM(base, r.buckets[0] ?? 'input') ?? ''}`}
             style={{ width: 86, fontSize: 12, padding: '1px 4px', textAlign: 'right', background: justReset ? 'rgba(22, 163, 74, 0.10)' : undefined, transition: 'background .2s ease' }}
           />
+          {billing.peak && (
+            <input
+              value={offPeakPrices[i] ?? ''}
+              onChange={(e) => setOffPeakPrices((os) => { const n = [...os]; n[i] = e.target.value; return n; })}
+              placeholder="谷价"
+              style={{ width: 86, fontSize: 12, padding: '1px 4px', textAlign: 'right', background: 'rgba(37, 99, 235, 0.06)' }}
+            />
+          )}
         </div>
       ))}
+
+      {billing.peak && (
+        <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${t.borderSoft}`, fontSize: 11, color: t.text2 }}>
+          <div style={{ marginBottom: 2 }}>分峰谷的星期（不勾 = 全天按谷价；周六周日默认不勾）</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+            {['日', '一', '二', '三', '四', '五', '六'].map((w, d) => (
+              <label key={d} style={{ fontSize: 11 }}>
+                <input
+                  type="checkbox"
+                  checked={peakDays.includes(d)}
+                  onChange={(e) => setPeakDays((ds) => (e.target.checked ? [...ds, d] : ds.filter((x) => x !== d)))}
+                /> {w}
+              </label>
+            ))}
+          </div>
+          <div style={{ marginBottom: 2 }}>高峰时段（北京时间，格式如 9-12, 14-18）</div>
+          <input
+            value={windowText}
+            onChange={(e) => setWindowText(e.target.value)}
+            placeholder="如 9-12, 14-18"
+            style={{ width: 200, fontSize: 12, padding: '1px 4px' }}
+          />
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
         <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>保存单价</button>
