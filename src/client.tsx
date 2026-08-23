@@ -969,7 +969,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         if (e === undefined) return null;
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
-                        const cell: CSSProperties = { width: '28%', textAlign: 'right' as const, fontSize: 12, padding: '3px 6px', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text };
+                        const cell: CSSProperties = { width: '100%', minWidth: 80, maxWidth: 150, boxSizing: 'border-box', textAlign: 'right' as const, fontSize: 12, padding: '5px 8px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text };
                         return (
                           <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
                             {/* 折叠头部 */}
