@@ -668,10 +668,10 @@ function PriceEditor({
         })
       : [],
   );
-  // Peak/off-peak schedule: which Beijing weekdays split + the peak-hour windows.
+  // Peak/off-peak schedule: which Beijing weekdays split + the peak-hour windows (minutes).
   const [peakDays, setPeakDays] = useState<number[]>(() => base?.peakDays ?? [1, 2, 3, 4, 5]);
-  const [peakWindows, setPeakWindows] = useState<Array<{ start: number; end: number }>>(() => base?.peakWindows ?? [{ start: 9, end: 12 }, { start: 14, end: 18 }]);
-  const [windowText, setWindowText] = useState(() => (base?.peakWindows ?? [{ start: 9, end: 12 }, { start: 14, end: 18 }]).map((w) => `${w.start}-${w.end}`).join(', '));
+  const [peakWindows, setPeakWindows] = useState<Array<{ start: number; end: number }>>(() => base?.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }]);
+  const [windowText, setWindowText] = useState(() => (base?.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }]).map((w) => `${Math.floor(w.start / 60)}:${String(w.start % 60).padStart(2, '0')}-${Math.floor(w.end / 60)}:${String(w.end % 60).padStart(2, '0')}`).join(', '));
   const sym = currency === 'USD' ? '$' : '¥';
 
   useEffect(() => {
@@ -776,8 +776,8 @@ function PriceEditor({
         pricePatch.offPeak = offPeak as unknown as number;
         pricePatch.peakDays = [...peakDays] as unknown as number;
         pricePatch.peakWindows = windowText.split(',').map((s) => {
-          const m = /^\s*(\d{1,2})\s*-\s*(\d{1,2})\s*$/.exec(s);
-          return m ? { start: Number(m[1]), end: Number(m[2]) } : null;
+          const m = /^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/.exec(s);
+          return m ? { start: Number(m[1]) * 60 + Number(m[2]), end: Number(m[3]) * 60 + Number(m[4]) } : null;
         }).filter((x): x is { start: number; end: number } => x !== null) as unknown as number;
       }
     }
@@ -891,12 +891,12 @@ function PriceEditor({
               </label>
             ))}
           </div>
-          <div style={{ marginBottom: 2 }}>高峰时段（北京时间，格式如 9-12, 14-18）</div>
+          <div style={{ marginBottom: 2 }}>高峰时段（北京时间，格式如 9:00-12:00, 14:00-18:00）</div>
           <input
             value={windowText}
             onChange={(e) => setWindowText(e.target.value)}
-            placeholder="如 9-12, 14-18"
-            style={{ width: 200, fontSize: 12, padding: '1px 4px' }}
+            placeholder="如 9:00-12:00, 14:00-18:00"
+            style={{ width: 220, fontSize: 12, padding: '1px 4px' }}
           />
         </div>
       )}
