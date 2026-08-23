@@ -64,7 +64,7 @@ const Config = z.object({
 export const name = 'usage-meter';
 
 /** Required services: settings (config namespace), projection registry, webserver (config route). */
-export const inject = ['settings', 'sessionProjections', 'webServer'];
+export const inject = ['settings', 'sessionProjections', 'webServer', 'llm'];
 
 // Ambient runtime facts the (pure, module-level) projection `view` reads.
 const runtimeConfig: { currency: string; initialBalance: number | null; budget: number | null } = {
@@ -998,6 +998,38 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       }
       res.writeHead(405);
       res.end();
+    },
+  });
+
+  // Model-directory channel: expose provider → models (from the DSH LLM runtime)
+  // so the settings "供应商定价管理" block can build its provider/model UI.
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/models',
+    handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      const send = (status: number, doc: unknown): void => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(doc as string | undefined));
+      };
+      try {
+        const llm = ctx.llm as {
+          listProviders: () => Array<{ id: string; name: string }>;
+          listModels: (p: string) => Promise<Array<{ id: string; name: string }>>;
+        };
+        const providers: Array<{ provider: string; label: string; models: Array<{ model: string; label: string }> }> = [];
+        for (const p of llm.listProviders()) {
+          let models: Array<{ model: string; label: string }> = [];
+          try {
+            models = (await llm.listModels(p.id)).map((m) => ({ model: m.id, label: m.name }));
+          } catch {
+            models = [];
+          }
+          providers.push({ provider: p.id, label: p.name, models });
+        }
+        send(200, { providers });
+      } catch (err) {
+        send(500, { providers: [], error: String(err) });
+      }
     },
   });
 

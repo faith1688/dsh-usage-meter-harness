@@ -62,7 +62,7 @@ export function apply(ctx: ClientContext): void {
   // composition without the settings UI simply never runs this effect.
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
-      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => 'dsh-usage-meter' },
+      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => '用量计量' },
       UsageMeterSettingsSection,
     ),
   );
@@ -511,6 +511,19 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
 }
 
 // ── settings panel page (full page in the left sidebar) ──────────────────────
+
+/** One provider entry from `GET /api/usage-meter/models`. */
+type ModelDirEntry = { provider: string; label: string; models: Array<{ model: string; label: string }> };
+/** Shape of one saved price override returned by `GET /api/usage-meter/config`. */
+type PriceOverrideEntry = { prices?: Record<string, unknown>; rows?: unknown };
+/** Per-model editable price draft (input/cacheHit/output). */
+type DraftModelPrices = { input: string; cache: string; output: string };
+type ModelSaveState = { ok: boolean; msg: string };
+
+function draftKeyOf(provider: string, model: string): string {
+  return `${provider}/${model}`;
+}
+
 function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -522,6 +535,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
 
+  // 供应商 → 模型 分组定价管理
+  const [modelDir, setModelDir] = useState<ModelDirEntry[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [selProvider, setSelProvider] = useState('');
+  const [overrides, setOverrides] = useState<Record<string, PriceOverrideEntry>>({});
+  const [drafts, setDrafts] = useState<Record<string, DraftModelPrices>>({});
+  const [saveStates, setSaveStates] = useState<Record<string, ModelSaveState>>({});
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -531,12 +552,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         const doc = (await res.json()) as {
           config?: Record<string, unknown>;
           providers?: Record<string, { currency?: string }>;
+          priceOverrides?: Record<string, PriceOverrideEntry>;
         };
         if (cancelled) return;
         const c = doc.config ?? {};
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
         setInitialBalance(get(c.initialBalance));
         setKeySaved(c.deepseekApiKey === '***');
+        setOverrides(doc.priceOverrides ?? {});
       } catch (err) {
         if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
       } finally {
@@ -545,6 +568,85 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // 分组定价管理：从 DSH 模型目录拉取 provider → models
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/usage-meter/models');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const doc = (await res.json()) as { providers?: ModelDirEntry[] };
+        if (cancelled) return;
+        const providers = doc.providers ?? [];
+        setModelDir(providers);
+        const first = providers[0];
+        if (first !== undefined) setSelProvider(first.provider);
+      } catch (err) {
+        if (!cancelled) { console.warn('[usage-meter] load models failed', err); setModelDir([]); }
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 草稿初值：从已存的 override 预填（切换 provider 时重置）
+  useEffect(() => {
+    const d: Record<string, DraftModelPrices> = {};
+    for (const p of modelDir) {
+      for (const m of p.models) {
+        const k = draftKeyOf(p.provider, m.model);
+        const prices = overrides[k]?.prices;
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+        d[k] = {
+          input: num(prices?.inputPerM) !== undefined ? String(prices?.inputPerM) : '',
+          cache: num(prices?.cacheReadPerM) !== undefined ? String(prices?.cacheReadPerM) : '',
+          output: num(prices?.outputPerM) !== undefined ? String(prices?.outputPerM) : '',
+        };
+      }
+    }
+    setDrafts(d);
+  }, [modelDir, overrides]);
+
+  const saveModelPrice = async (provider: string, model: string) => {
+    const k = draftKeyOf(provider, model);
+    const d = drafts[k] ?? { input: '', cache: '', output: '' };
+    const prices: Record<string, number> = {};
+    const num = (s: string): number | undefined => {
+      if (s.trim() === '') return undefined;
+      const n = Number(s);
+      return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+    const input = num(d.input);
+    const output = num(d.output);
+    const cache = num(d.cache);
+    if (input !== undefined) prices.inputPerM = input;
+    if (output !== undefined) prices.outputPerM = output;
+    if (cache !== undefined) prices.cacheReadPerM = cache;
+    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存中…' } }));
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, model, prices }),
+      });
+      const ok = res.ok;
+      setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : `保存失败 (${res.status})` } }));
+      if (ok) {
+        // 保存成功后同步本地 override（预填值即刚存的）
+        setOverrides((o) => ({ ...o, [k]: { prices } }));
+      }
+    } catch (err) {
+      console.warn('[usage-meter] save model price failed', err);
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存失败' } }));
+    }
+    window.setTimeout(() => setSaveStates((s) => {
+      const n = { ...s };
+      delete n[k];
+      return n;
+    }), 2500);
+  };
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 0' };
   const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 120 };
@@ -627,6 +729,76 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
               </span>
             )}
           </div>
+
+          {/* ── 供应商 → 模型 分组定价管理 ─────────────────────────────── */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${t.borderSoft}` }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>供应商定价管理</div>
+            <div style={{ color: t.text3, fontSize: 11, marginBottom: 8 }}>
+              按供应商 → 模型为每个模型设置「输入（缓存未命中）/ 缓存命中 / 输出」单价，保存后写入该 provider/model 的价格覆盖。
+            </div>
+            {modelsLoading ? (
+              <div style={{ color: t.text3, fontSize: 12 }}>加载模型目录…</div>
+            ) : modelDir.length === 0 ? (
+              <div style={{ color: t.text3, fontSize: 12 }}>
+                未从模型目录获取到模型。请确认当前组合已注册 LLM 适配（`ctx.llm`）。
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: t.text2 }} htmlFor="um-provider">供应商</label>
+                  <select
+                    id="um-provider"
+                    value={selProvider}
+                    onChange={(e) => setSelProvider(e.target.value)}
+                    style={{ padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text, maxWidth: 320 }}
+                  >
+                    {modelDir.map((p) => (
+                      <option key={p.provider} value={p.provider}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {(() => {
+                  const active = modelDir.find((p) => p.provider === selProvider);
+                  if (active === undefined) return <div style={{ color: t.text3, fontSize: 12 }}>请选择供应商</div>;
+                  if (active.models.length === 0) return <div style={{ color: t.text3, fontSize: 12 }}>该供应商下暂无模型</div>;
+                  return (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, color: t.text3, fontSize: 10 }}>
+                        <span style={{ flex: 1, minWidth: 0 }}>模型</span>
+                        <span style={{ width: 90, textAlign: 'right' }}>输入(未命中)</span>
+                        <span style={{ width: 90, textAlign: 'right' }}>缓存命中</span>
+                        <span style={{ width: 90, textAlign: 'right' }}>输出</span>
+                        <span style={{ width: 58 }} />
+                        <span style={{ width: 78, textAlign: 'right' }} />
+                      </div>
+                      {active.models.map((m) => {
+                        const k = draftKeyOf(active.provider, m.model);
+                        const d = drafts[k] ?? { input: '', cache: '', output: '' };
+                        const st = saveStates[k];
+                        return (
+                          <div key={m.model} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: t.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {m.label}
+                            </span>
+                            <input value={d.input} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, input: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
+                            <input value={d.cache} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, cache: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
+                            <input value={d.output} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, output: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
+                            <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)} style={{ fontSize: 12, padding: '3px 8px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                              保存
+                            </button>
+                            {st !== undefined && (
+                              <span style={{ width: 78, textAlign: 'right', fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
           <p style={{ color: t.text3, fontSize: 11, marginTop: 12, marginBottom: 0 }}>
             会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。
           </p>
