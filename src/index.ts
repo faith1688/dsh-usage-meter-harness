@@ -66,8 +66,18 @@ export const name = 'usage-meter';
 /** Required services: settings (config namespace), projection registry, webserver (config route). */
 export const inject = ['settings', 'sessionProjections', 'webServer', 'llm'];
 
-// Ambient runtime facts the (pure, module-level) projection `view` reads.
-const runtimeConfig: { currency: string; initialBalance: number | null; budget: number | null } = {
+// Ambient runtime facts the (pure, module-level) projection `view` reads. The
+// cfg-owned fields (priceSourceUrl / refreshIntervalMs / deepseekApiKey) are
+// mirrored here so `savePersistedConfig()` can round-trip ALL global settings
+// to the file regardless of which layer last set them.
+const runtimeConfig: {
+  currency: string;
+  initialBalance: number | null;
+  budget: number | null;
+  priceSourceUrl?: string;
+  refreshIntervalMs?: number;
+  deepseekApiKey?: string;
+} = {
   currency: 'CNY',
   initialBalance: null,
   budget: null,
@@ -152,6 +162,10 @@ function applyPriceOverrides(): void {
         ...(p.discount !== undefined ? { discount: p.discount } : {}),
         ...(p.peak !== undefined ? { peak: p.peak } : {}),
         ...(p.offPeak !== undefined ? { offPeak: p.offPeak } : {}),
+        ...(p.peakDays !== undefined ? { peakDays: p.peakDays } : {}),
+        ...(p.peakWindows !== undefined ? { peakWindows: p.peakWindows } : {}),
+        ...(p.peakOffPeakFrom !== undefined ? { peakOffPeakFrom: p.peakOffPeakFrom } : {}),
+        ...(p.weekend !== undefined ? { weekend: p.weekend } : {}),
         ...(p.currency !== undefined ? { currency: p.currency } : {}),
         source: 'user',
       };
@@ -190,6 +204,9 @@ function loadPersistedConfig(): Record<string, unknown> {
       providers?: Record<string, { currency?: string; initialBalance?: number; topUps?: Array<{ amount: number }> }>;
       priceOverrides?: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }>;
       balances?: Record<string, { balance: number; currency: string }>;
+      currency?: string;
+      initialBalance?: number;
+      budget?: number;
       priceSourceUrl?: string;
       refreshIntervalMs?: number;
       deepseekApiKey?: string;
@@ -213,6 +230,9 @@ function loadPersistedConfig(): Record<string, unknown> {
     }
     if (doc.balances) Object.assign(balances, doc.balances);
     const global: Record<string, unknown> = {};
+    if (typeof doc.currency === 'string' && doc.currency !== '') global.currency = doc.currency;
+    if (typeof doc.initialBalance === 'number' && Number.isFinite(doc.initialBalance)) global.initialBalance = doc.initialBalance;
+    if (typeof doc.budget === 'number' && Number.isFinite(doc.budget)) global.budget = doc.budget;
     if (doc.priceSourceUrl !== undefined) global.priceSourceUrl = doc.priceSourceUrl;
     if (doc.refreshIntervalMs !== undefined) global.refreshIntervalMs = doc.refreshIntervalMs;
     if (doc.deepseekApiKey !== undefined) global.deepseekApiKey = doc.deepseekApiKey;
@@ -222,9 +242,20 @@ function loadPersistedConfig(): Record<string, unknown> {
   }
 }
 
+/** Persist EVERY persisted state — the three per-model/per-provider blocks PLUS
+ *  the global settings (currency, initialBalance, budget, priceSourceUrl,
+ *  refreshIntervalMs, deepseekApiKey) read from the `runtimeConfig` mirror.
+ *  This is what makes globals survive a server restart. */
 function savePersistedConfig(): void {
   try {
-    writeFileSync(configPath(), JSON.stringify({ providers: providerConfigs, priceOverrides, balances }, null, 2), 'utf8');
+    const payload: Record<string, unknown> = { providers: providerConfigs, priceOverrides, balances };
+    if (typeof runtimeConfig.currency === 'string' && runtimeConfig.currency !== '') payload.currency = runtimeConfig.currency;
+    if (typeof runtimeConfig.initialBalance === 'number') payload.initialBalance = runtimeConfig.initialBalance;
+    if (typeof runtimeConfig.budget === 'number') payload.budget = runtimeConfig.budget;
+    if (typeof runtimeConfig.priceSourceUrl === 'string' && runtimeConfig.priceSourceUrl !== '') payload.priceSourceUrl = runtimeConfig.priceSourceUrl;
+    if (typeof runtimeConfig.refreshIntervalMs === 'number' && Number.isFinite(runtimeConfig.refreshIntervalMs)) payload.refreshIntervalMs = runtimeConfig.refreshIntervalMs;
+    if (typeof runtimeConfig.deepseekApiKey === 'string' && runtimeConfig.deepseekApiKey !== '') payload.deepseekApiKey = runtimeConfig.deepseekApiKey;
+    writeFileSync(configPath(), JSON.stringify(payload, null, 2), 'utf8');
   } catch (err) {
     console.warn('[usage-meter] failed to persist config:', err);
   }
@@ -799,6 +830,15 @@ class UsageMeterCore {
     runtimeConfig.currency = (cfg.currency as string) ?? 'CNY';
     runtimeConfig.initialBalance = typeof cfg.initialBalance === 'number' && cfg.initialBalance > 0 ? cfg.initialBalance : null;
     runtimeConfig.budget = typeof cfg.budget === 'number' && cfg.budget > 0 ? cfg.budget : null;
+    // Mirror cfg-owned globals into the runtimeConfig singleton so
+    // savePersistedConfig() can round-trip ALL settings to the file, keeping
+    // the mirror in sync no matter which layer (schema defaults → file →
+    // settings.yaml user section) last set a value via applyConfig/
+    // scope.watch.
+    if (typeof cfg.priceSourceUrl === 'string') runtimeConfig.priceSourceUrl = cfg.priceSourceUrl;
+    if (typeof cfg.refreshIntervalMs === 'number') runtimeConfig.refreshIntervalMs = cfg.refreshIntervalMs;
+    else if (cfg.refreshIntervalMs === undefined) runtimeConfig.refreshIntervalMs = undefined;
+    if (typeof cfg.deepseekApiKey === 'string') runtimeConfig.deepseekApiKey = cfg.deepseekApiKey;
   }
 
   getPrice(provider: string, model: string): ModelPricing | undefined {
@@ -889,7 +929,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   const effectiveConfig = { ...config, ...loadPersistedConfig() };
   const meter = new UsageMeterCore(effectiveConfig);
   meter.applyConfig(effectiveConfig);
-  const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: config });
+  // `base` = the file-resolved globals, so the resolution order is
+  // schema-defaults → usage-meter.json globals → settings.yaml `usage-meter`
+  // user section; a user-written section still wins over the file.
+  const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: effectiveConfig });
   meter.applyConfig(scope.get());
   scope.watch((next: unknown) => meter.applyConfig(next as Record<string, unknown>));
   ctx.sessionProjections.register(usageCostProjection);
@@ -932,10 +975,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         for await (const chunk of req) body += String(chunk);
         const patch = JSON.parse(body) as Record<string, unknown>;
         const merged = { ...meter.getConfig() };
+        if (patch.currency !== undefined && typeof patch.currency === 'string' && patch.currency !== '') merged.currency = patch.currency;
+        if (patch.initialBalance !== undefined && typeof patch.initialBalance === 'number' && Number.isFinite(patch.initialBalance)) merged.initialBalance = patch.initialBalance;
+        if (patch.budget !== undefined && typeof patch.budget === 'number' && Number.isFinite(patch.budget)) merged.budget = patch.budget;
         if (patch.priceSourceUrl !== undefined) merged.priceSourceUrl = patch.priceSourceUrl;
         if (patch.refreshIntervalMs !== undefined) merged.refreshIntervalMs = patch.refreshIntervalMs;
         if (patch.deepseekApiKey !== undefined && patch.deepseekApiKey !== '***') merged.deepseekApiKey = patch.deepseekApiKey;
         meter.applyConfig(merged);
+        // Persist the globals immediately (not just on provider/model paths) so
+        // a settings-page save of currency / initial balance / budget survives a
+        // restart even if no provider or model section touches the file.
+        savePersistedConfig();
         let currencyChanged = false;
         let ledgerChanged = false;
         let ledgerKey: string | null = null;

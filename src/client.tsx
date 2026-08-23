@@ -517,11 +517,89 @@ type ModelDirEntry = { provider: string; label: string; models: Array<{ model: s
 /** Shape of one saved price override returned by `GET /api/usage-meter/config`. */
 type PriceOverrideEntry = { prices?: Record<string, unknown>; rows?: unknown };
 /** Per-model editable price draft (input/cacheHit/output). */
-type DraftModelPrices = { input: string; cache: string; output: string };
 type ModelSaveState = { ok: boolean; msg: string };
 
 function draftKeyOf(provider: string, model: string): string {
   return `${provider}/${model}`;
+}
+
+function isDeepseekRoute(provider: string): boolean {
+  return provider === 'deepseek' || provider === 'deepseek-official';
+}
+
+const DAY_LABELS: Array<[number, string]> = [[0, '日'], [1, '一'], [2, '二'], [3, '三'], [4, '四'], [5, '五'], [6, '六']];
+
+function fmtClock(minutes: number): string {
+  const m = Math.max(0, Math.min(1439, Math.round(minutes)));
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}
+
+
+
+/** "9:00-12:00, 14:00-18:00" → [{start:540,end:720},{start:840,end:1080}] (Beijing minutes). */
+function parsePeakWindowsText(text: string): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  for (const part of text.split(/[,，]/)) {
+    const m = /^\s*(\d{1,2}):(\d{2})\s*[-–—~]\s*(\d{1,2}):(\d{2})\s*$/.exec(part.trim());
+    if (!m) continue;
+    const start = Number(m[1]) * 60 + Number(m[2]);
+    const end = Number(m[3]) * 60 + Number(m[4]);
+    if (end > start) out.push({ start, end });
+  }
+  return out;
+}
+
+function formatPeakWindows(wins: Array<{ start: number; end: number }>): string {
+  return wins.map((w) => `${fmtClock(w.start)}-${fmtClock(w.end)}`).join(', ');
+}
+
+type BalancesDoc = Record<string, { balance?: number; currency?: string }>;
+
+/** One model's full editable state: flat price row, 峰/谷 grid, 币种, 用户余额,
+ *  and 峰谷开关 + 生效星期 + 高峰时段文本. */
+type ModelEditorState = {
+  input: string; cache: string; output: string;
+  inputPeak: string; inputOff: string;
+  cachePeak: string; cacheOff: string;
+  outPeak: string; outOff: string;
+  currency: string;
+  balance: string;
+  peakOn: boolean;
+  days: number[];
+  windowText: string;
+};
+
+/** Seed one model's editor state from the stored override (flat or peak-tiered),
+ *  the balance ledger (model entry → provider entry), and stored days/windows —
+ *  defaulting to workdays + 9-12 · 14-18 like the rest of the meter. */
+function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: BalancesDoc): ModelEditorState {
+  const pe = ov[key]?.prices as Record<string, unknown> | undefined;
+  const n = (v: unknown): string => (typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+  const tier = (v: unknown): { ip: string; cp: string; op: string } => {
+    if (v === null || typeof v !== 'object') return { ip: '', cp: '', op: '' };
+    const o = v as Record<string, unknown>;
+    return { ip: n(o.inputPerM), cp: n(o.cacheReadPerM), op: n(o.outputPerM) };
+  };
+  const flatInput = n(pe?.inputPerM);
+  const flatCache = n(pe?.cacheReadPerM);
+  const flatOutput = n(pe?.outputPerM);
+  const peak = tier(pe?.peak);
+  const off = tier(pe?.offPeak);
+  const provider = key.split('/')[0];
+  const model = key.slice(provider.length + 1);
+  const hasBal = (v: { balance?: number; currency?: string } | undefined) => v !== undefined && typeof v.balance === 'number';
+  const bal = hasBal(bals[`m:${provider}/${model}`]) ? bals[`m:${provider}/${model}`] : hasBal(bals[`p:${provider}`]) ? bals[`p:${provider}`] : undefined;
+  return {
+    input: flatInput, cache: flatCache, output: flatOutput,
+    inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
+    cachePeak: peak.cp || flatCache, cacheOff: off.cp || flatCache,
+    outPeak: peak.op || flatOutput, outOff: off.op || flatOutput,
+    currency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
+    balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
+    peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
+    days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : [1, 2, 3, 4, 5],
+    windowText: formatPeakWindows(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : [{ start: 540, end: 720 }, { start: 840, end: 1080 }]),
+  };
 }
 
 function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement {
@@ -540,8 +618,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [modelsLoading, setModelsLoading] = useState(true);
   const [selProvider, setSelProvider] = useState('');
   const [overrides, setOverrides] = useState<Record<string, PriceOverrideEntry>>({});
-  const [drafts, setDrafts] = useState<Record<string, DraftModelPrices>>({});
+  const [balances, setBalances] = useState<BalancesDoc>({});
+  const [edits, setEdits] = useState<Record<string, ModelEditorState>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [saveStates, setSaveStates] = useState<Record<string, ModelSaveState>>({});
+  const [savingAll, setSavingAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -553,6 +634,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           config?: Record<string, unknown>;
           providers?: Record<string, { currency?: string }>;
           priceOverrides?: Record<string, PriceOverrideEntry>;
+          balances?: BalancesDoc;
         };
         if (cancelled) return;
         const c = doc.config ?? {};
@@ -560,6 +642,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         setInitialBalance(get(c.initialBalance));
         setKeySaved(c.deepseekApiKey === '***');
         setOverrides(doc.priceOverrides ?? {});
+        setBalances(doc.balances ?? {});
       } catch (err) {
         if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
       } finally {
@@ -591,61 +674,138 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     return () => { cancelled = true; };
   }, []);
 
-  // 草稿初值：从已存的 override 预填（切换 provider 时重置）
+  // 草稿初值：从已存的 override + 余额账本预填（目录/override/余额变化时重置）
   useEffect(() => {
-    const d: Record<string, DraftModelPrices> = {};
+    const d: Record<string, ModelEditorState> = {};
     for (const p of modelDir) {
       for (const m of p.models) {
-        const k = draftKeyOf(p.provider, m.model);
-        const prices = overrides[k]?.prices;
-        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-        d[k] = {
-          input: num(prices?.inputPerM) !== undefined ? String(prices?.inputPerM) : '',
-          cache: num(prices?.cacheReadPerM) !== undefined ? String(prices?.cacheReadPerM) : '',
-          output: num(prices?.outputPerM) !== undefined ? String(prices?.outputPerM) : '',
-        };
+        d[draftKeyOf(p.provider, m.model)] = seedEntry(draftKeyOf(p.provider, m.model), overrides, balances);
       }
     }
-    setDrafts(d);
-  }, [modelDir, overrides]);
+    setEdits(d);
+  }, [modelDir, overrides, balances]);
 
-  const saveModelPrice = async (provider: string, model: string) => {
-    const k = draftKeyOf(provider, model);
-    const d = drafts[k] ?? { input: '', cache: '', output: '' };
-    const prices: Record<string, number> = {};
+  // 由某模型当前编辑态构建 POST body：基础价 +（峰谷开启时）峰/谷价对 +
+  // 生效星期 + 高峰时段（北京分钟）+ 单价币种；非 DeepSeek 附带用户余额。
+  const buildModelBody = (provider: string, model: string): Record<string, unknown> | null => {
+    const e = edits[draftKeyOf(provider, model)];
+    if (e === undefined) return null;
     const num = (s: string): number | undefined => {
-      if (s.trim() === '') return undefined;
-      const n = Number(s);
+      const t = s.trim();
+      if (t === '') return undefined;
+      const n = Number(t);
       return Number.isFinite(n) && n >= 0 ? n : undefined;
     };
-    const input = num(d.input);
-    const output = num(d.output);
-    const cache = num(d.cache);
+    const prices: Record<string, unknown> = {};
+    const input = num(e.input);
+    const output = num(e.output);
+    const cache = num(e.cache);
     if (input !== undefined) prices.inputPerM = input;
     if (output !== undefined) prices.outputPerM = output;
     if (cache !== undefined) prices.cacheReadPerM = cache;
-    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存中…' } }));
-    try {
-      const res = await fetch('/api/usage-meter/config', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider, model, prices }),
-      });
-      const ok = res.ok;
-      setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : `保存失败 (${res.status})` } }));
-      if (ok) {
-        // 保存成功后同步本地 override（预填值即刚存的）
-        setOverrides((o) => ({ ...o, [k]: { prices } }));
+    if (e.peakOn) {
+      const tier = (ip: string, cp: string, op: string): Record<string, unknown> => {
+        const o: Record<string, unknown> = {};
+        const a = num(ip);
+        if (a !== undefined) o.inputPerM = a;
+        const b = num(cp);
+        if (b !== undefined) o.cacheReadPerM = b;
+        const c = num(op);
+        if (c !== undefined) o.outputPerM = c;
+        return o;
+      };
+      prices.peak = tier(e.inputPeak, e.cachePeak, e.outPeak);
+      prices.offPeak = tier(e.inputOff, e.cacheOff, e.outOff);
+      const days = e.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b);
+      if (days.length > 0) prices.peakDays = days;
+      const wins = parsePeakWindowsText(e.windowText);
+      if (wins.length > 0) prices.peakWindows = wins;
+    }
+    if (e.currency !== 'CNY' && e.currency !== '') prices.currency = e.currency;
+    const body: Record<string, unknown> = { provider, model, prices };
+    const bal = num(e.balance);
+    if (!isDeepseekRoute(provider) && bal !== undefined) body.balance = bal;
+    return body;
+  };
+
+  const persistModel = async (provider: string, model: string, body: Record<string, unknown>): Promise<boolean> => {
+    const k = draftKeyOf(provider, model);
+    const res = await fetch('/api/usage-meter/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      if (body.balance !== undefined) {
+        setBalances((b) => ({ ...b, [`m:${provider}/${model}`]: { balance: Number(body.balance) } }));
       }
+      setOverrides((o) => ({ ...o, [k]: { prices: body.prices as Record<string, unknown> } }));
+    }
+    return res.ok;
+  };
+
+  const saveModelPrice = async (provider: string, model: string) => {
+    const k = draftKeyOf(provider, model);
+    const body = buildModelBody(provider, model);
+    if (body === null) return;
+    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存中…' } }));
+    let ok = false;
+    try {
+      ok = await persistModel(provider, model, body);
     } catch (err) {
       console.warn('[usage-meter] save model price failed', err);
-      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存失败' } }));
     }
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : '保存失败' } }));
     window.setTimeout(() => setSaveStates((s) => {
       const n = { ...s };
       delete n[k];
       return n;
     }), 2500);
+  };
+
+  const resetModelPrice = async (provider: string, model: string) => {
+    const k = draftKeyOf(provider, model);
+    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '重置中…' } }));
+    let ok = false;
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, model, reset: true }),
+      });
+      ok = res.ok;
+      if (ok) {
+        setOverrides((o) => { const n = { ...o }; delete n[k]; return n; });
+      }
+    } catch (err) {
+      console.warn('[usage-meter] reset model price failed', err);
+    }
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已重置为内置价格' : '重置失败' } }));
+    window.setTimeout(() => setSaveStates((s) => {
+      const n = { ...s };
+      delete n[k];
+      return n;
+    }), 2500);
+  };
+
+  // 一键保存当前供应商下的全部模型
+  const saveAllModels = async () => {
+    const prov = modelDir.find((p) => p.provider === selProvider);
+    if (prov === undefined) return;
+    setSavingAll(true);
+    await Promise.all(prov.models.map(async (m) => {
+      const k = draftKeyOf(prov.provider, m.model);
+      const body = buildModelBody(prov.provider, m.model);
+      if (body === null) return;
+      let ok = false;
+      try {
+        ok = await persistModel(prov.provider, m.model, body);
+      } catch (err) {
+        console.warn('[usage-meter] save all: failed', err);
+      }
+      setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : '保存失败' } }));
+    }));
+    setSavingAll(false);
   };
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 0' };
@@ -730,27 +890,45 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             )}
           </div>
 
-          {/* ── 供应商 → 模型 分组定价管理 ─────────────────────────────── */}
+          {/* ── 供应商 → 模型 分组定价管理（可折叠）────────────────────── */}
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${t.borderSoft}` }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>供应商定价管理</div>
-            <div style={{ color: t.text3, fontSize: 11, marginBottom: 8 }}>
-              按供应商 → 模型为每个模型设置「输入（缓存未命中）/ 缓存命中 / 输出」单价，保存后写入该 provider/model 的价格覆盖。
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>用量计量 · 模型配置</div>
+                <div style={{ color: t.text3, fontSize: 11, marginBottom: 0 }}>
+                  按供应商 → 模型为每个模型单独设置币种、用户余额、单价（含峰谷价对）、生效星期与高峰时段。
+                </div>
+              </div>
+              {(() => {
+                const prov = modelDir.find((p) => p.provider === selProvider);
+                if (prov === undefined || prov.models.length === 0) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => void saveAllModels()}
+                    disabled={savingAll}
+                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: `1px solid ${t.border}`, background: savingAll ? 'rgba(139,148,158,0.10)' : t.accent, color: savingAll ? t.text3 : t.text, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {savingAll ? '保存中…' : '一键保存全部'}
+                  </button>
+                );
+              })()}
             </div>
             {modelsLoading ? (
-              <div style={{ color: t.text3, fontSize: 12 }}>加载模型目录…</div>
+              <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>加载模型目录…</div>
             ) : modelDir.length === 0 ? (
-              <div style={{ color: t.text3, fontSize: 12 }}>
+              <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>
                 未从模型目录获取到模型。请确认当前组合已注册 LLM 适配（`ctx.llm`）。
               </div>
             ) : (
-              <div>
+              <div style={{ marginTop: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <label style={{ fontSize: 12, color: t.text2 }} htmlFor="um-provider">供应商</label>
                   <select
                     id="um-provider"
                     value={selProvider}
                     onChange={(e) => setSelProvider(e.target.value)}
-                    style={{ padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text, maxWidth: 320 }}
+                    style={select}
                   >
                     {modelDir.map((p) => (
                       <option key={p.provider} value={p.provider}>{p.label}</option>
@@ -761,33 +939,139 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                   const active = modelDir.find((p) => p.provider === selProvider);
                   if (active === undefined) return <div style={{ color: t.text3, fontSize: 12 }}>请选择供应商</div>;
                   if (active.models.length === 0) return <div style={{ color: t.text3, fontSize: 12 }}>该供应商下暂无模型</div>;
+                  const deep = isDeepseekRoute(active.provider);
                   return (
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, color: t.text3, fontSize: 10 }}>
-                        <span style={{ flex: 1, minWidth: 0 }}>模型</span>
-                        <span style={{ width: 90, textAlign: 'right' }}>输入(未命中)</span>
-                        <span style={{ width: 90, textAlign: 'right' }}>缓存命中</span>
-                        <span style={{ width: 90, textAlign: 'right' }}>输出</span>
-                        <span style={{ width: 58 }} />
-                        <span style={{ width: 78, textAlign: 'right' }} />
-                      </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {active.models.map((m) => {
                         const k = draftKeyOf(active.provider, m.model);
-                        const d = drafts[k] ?? { input: '', cache: '', output: '' };
+                        const e = edits[k];
+                        if (e === undefined) return null;
+                        const isOpen = expanded[k] === true;
                         const st = saveStates[k];
+                        const cell: CSSProperties = { width: '28%', textAlign: 'right' as const, fontSize: 12, padding: '3px 6px', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text };
                         return (
-                          <div key={m.model} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: t.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {m.label}
-                            </span>
-                            <input value={d.input} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, input: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
-                            <input value={d.cache} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, cache: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
-                            <input value={d.output} onChange={(e) => setDrafts((ds) => ({ ...ds, [k]: { ...d, output: e.target.value } }))} placeholder="元/M" style={{ width: 90, fontSize: 12, padding: '2px 4px', textAlign: 'right', border: `1px solid ${t.border}`, borderRadius: 4, background: t.card, color: t.text }} />
-                            <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)} style={{ fontSize: 12, padding: '3px 8px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                              保存
+                          <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                            {/* 折叠头部 */}
+                            <button
+                              type="button"
+                              onClick={() => setExpanded((s) => ({ ...s, [k]: !isOpen }))}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? t.card : 'transparent', color: t.text, cursor: 'pointer' }}
+                            >
+                              <span style={{ fontSize: 10, color: t.text3 }}>{isOpen ? '▼' : '▶'}</span>
+                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                              {e.peakOn && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,148,158,0.12)', color: t.text2, whiteSpace: 'nowrap' }}>峰谷</span>}
+                              <span style={{ fontSize: 10, color: t.text3 }}>{e.currency}</span>
                             </button>
-                            {st !== undefined && (
-                              <span style={{ width: 78, textAlign: 'right', fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>
+                            {/* 展开体 */}
+                            {isOpen && (
+                              <div style={{ padding: '4px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+                                  <label style={field} htmlFor={`um-cur-${k}`}>
+                                    <span style={{ fontSize: 12, color: t.text2 }}>币种</span>
+                                    <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, currency: ev.target.value } }))}
+                                      style={{ ...select, maxWidth: 100, fontSize: 12, padding: '3px 6px' }}>
+                                      <option value="CNY">CNY (¥)</option>
+                                      <option value="USD">USD ($)</option>
+                                    </select>
+                                  </label>
+                                  {!deep && (
+                                    <label style={field} htmlFor={`um-bal-${k}`}>
+                                      <span style={{ fontSize: 12, color: t.text2 }}>用户余额</span>
+                                      <input id={`um-bal-${k}`} value={e.balance}
+                                        onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, balance: ev.target.value } }))}
+                                        placeholder="如 100"
+                                        style={{ ...input, maxWidth: 140, fontSize: 12, padding: '3px 6px' }} />
+                                    </label>
+                                  )}
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>基础单价（元/M 或 $/M）</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
+                                    <span style={{ fontSize: 10, color: t.text3 }} />
+                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输入(未命中)</span>
+                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>缓存命中</span>
+                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输出</span>
+                                    <span style={{ fontSize: 11, color: t.text2 }}>单价</span>
+                                    {(['input', 'cache', 'output'] as const).map((fld) => {
+                                      const key = `um-${fld}-${k}`;
+                                      const val = e[fld];
+                                      return (
+                                        <input key={key} id={key} value={val}
+                                          onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
+                                          placeholder="元/M" style={cell} />
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' as const }}>
+                                      <input type="checkbox" checked={e.peakOn}
+                                        onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, peakOn: ev.target.checked } }))}
+                                        style={{ accentColor: t.accent }} />
+                                      <span style={{ fontSize: 12, color: t.text2 }}>启用峰谷计费</span>
+                                    </label>
+                                    <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; 未勾选星期 = 谷价</span>
+                                  </div>
+                                  {e.peakOn && (
+                                    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, padding: '6px 8px', background: 'rgba(139,148,158,0.06)', borderRadius: 4 }}>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 10, color: t.text3 }} />
+                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输入(未命中)</span>
+                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>缓存命中</span>
+                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输出</span>
+                                        <span style={{ fontSize: 11, color: t.text2 }}>峰价</span>
+                                        {(['inputPeak', 'cachePeak', 'outPeak'] as const).map((fld) => {
+                                          const key = `um-${fld}-${k}`;
+                                          return <input key={key} id={key} value={e[fld]}
+                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
+                                            placeholder="元/M" style={cell} />;
+                                        })}
+                                        <span style={{ fontSize: 11, color: t.text2 }}>谷价</span>
+                                        {(['inputOff', 'cacheOff', 'outOff'] as const).map((fld) => {
+                                          const key = `um-${fld}-${k}`;
+                                          return <input key={key} id={key} value={e[fld]}
+                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
+                                            placeholder="元/M" style={cell} />;
+                                        })}
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+                                        <span style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }}>峰谷星期:</span>
+                                        {DAY_LABELS.map(([d, lbl]) => (
+                                          <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer' as const }}>
+                                            <input type="checkbox" checked={e.days.includes(d)}
+                                              onChange={(ev) => setEdits((s) => {
+                                                const prev = e.days;
+                                                const next = ev.target.checked ? [...prev, d].sort((a, b) => a - b) : prev.filter((x) => x !== d);
+                                                return { ...s, [k]: { ...e, days: next } };
+                                              })}
+                                              style={{ accentColor: t.accent }} />
+                                            <span style={{ fontSize: 11, color: t.text }}>{lbl}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <label style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }} htmlFor={`um-hr-${k}`}>高峰时段(HH:MM-HH:MM):</label>
+                                        <input id={`um-hr-${k}`} value={e.windowText}
+                                          onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windowText: ev.target.value } }))}
+                                          placeholder="9:00-12:00, 14:00-18:00"
+                                          style={{ ...input, maxWidth: 260, fontSize: 12, padding: '3px 6px' }} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
+                                    style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+                                    保存单价
+                                  </button>
+                                  <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
+                                    style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
+                                    重置价格
+                                  </button>
+                                  {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
+                                </div>
+                              </div>
                             )}
                           </div>
                         );
