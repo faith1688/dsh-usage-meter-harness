@@ -795,24 +795,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     }), 2500);
   };
 
-  const resetModelPrice = async (provider: string, model: string) => {
+  const resetModelPrice = (provider: string, model: string) => {
     const k = draftKeyOf(provider, model);
-    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '重置中…' } }));
-    let ok = false;
-    try {
-      const res = await fetch('/api/usage-meter/config', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider, model, reset: true }),
-      });
-      ok = res.ok;
-      if (ok) {
-        setOverrides((o) => { const n = { ...o }; delete n[k]; return n; });
-      }
-    } catch (err) {
-      console.warn('[usage-meter] reset model price failed', err);
-    }
-    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已重置为内置价格' : '重置失败' } }));
+    // 重置 = 丢弃未保存修改，回退到「该模型上次已保存的价格」；DeepSeek 官方模型
+    // 且从未改过 → 回退到官方价（seedEntry 里已含官方预填）。
+    setEdits((s) => ({ ...s, [k]: seedEntry(k, overrides, balances) }));
+    const official = isDeepseekRoute(provider);
+    setSaveStates((s) => ({ ...s, [k]: { ok: true, msg: official ? '已重置为官方价' : '已重置为该模型已保存的价格' } }));
     window.setTimeout(() => setSaveStates((s) => {
       const n = { ...s };
       delete n[k];
