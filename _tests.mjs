@@ -109,7 +109,36 @@ tc(50, '模板清单恰好 6 个且不含已删的 storage/tiered', () => {
   assert.ok(!ids.includes('cache-storage') && !ids.includes('tiered'), ids.join(','));
 });
 
+// ── I. 自定义行组合策略：4 行桶全排列(24) × 峰内/谷时(2) = 48 组合 ──
+// 每行独立选一个桶（radio 唯一），费用必须恒等于 Σ 行价×该行桶 token。
+{
+  const perms = [[0,1,2,3],[0,1,3,2],[0,2,1,3],[0,2,3,1],[0,3,1,2],[0,3,2,1],
+    [1,0,2,3],[1,0,3,2],[1,2,0,3],[1,2,3,0],[1,3,0,2],[1,3,2,0],
+    [2,0,1,3],[2,0,3,1],[2,1,0,3],[2,1,3,0],[2,3,0,1],[2,3,1,0],
+    [3,0,1,2],[3,0,2,1],[3,1,0,2],[3,1,2,0],[3,2,0,1],[3,2,1,0]];
+  const BUCKETS = ['input', 'cacheRead', 'cacheWrite', 'output'];
+  const PRICES = { input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 2 };
+  const PEAKP = { input: 3, cacheRead: 0.1, cacheWrite: 5, output: 9 };
+  const OFFP = { input: 0.5, cacheRead: 0.02, cacheWrite: 0.6, output: 4 };
+  const TOK = { input: U.inputTokens, cacheRead: U.cacheReadTokens, cacheWrite: U.cacheWriteTokens, output: U.outputTokens };
+  let comboPass = 0; const comboTotal = perms.length * 2; const errs = [];
+  for (let pi = 0; pi < perms.length; pi++) {
+    const rows = perms[pi].map((bi, row) => ({ label: `r${row}`, buckets: [BUCKETS[bi]], perM: PRICES[BUCKETS[bi]], peakPerM: PEAKP[BUCKETS[bi]], offPerM: OFFP[BUCKETS[bi]] }));
+    for (const when of ['peak', 'off']) {
+      const t = when === 'peak' ? MON : MON_NIGHT;
+      const resolved = resolvePricingForTime({ inputPerM: 0, outputPerM: 0, peakDays: [0,1,2,3,4,5,6], peakWindows: [{ start: 540, end: 720 }], customRows: rows }, t);
+      const got = costOf(U, resolved);
+      const want = rows.reduce((s, r) => s + TOK[r.buckets[0]] / 1e6 * (when === 'peak' ? r.peakPerM : r.offPerM), 0);
+      if (Math.abs(got - want) > 1e-9) errs.push(`perm#${pi}-${when}: got ${got} want ${want}`);
+      else comboPass++;
+    }
+  }
+  tc(51, `自定义行组合策略 ${comboPass}/${comboTotal} 通过（24 排列×峰/谷，每行唯一桶）`, () => {
+    assert.strictEqual(errs.length, 0, errs.slice(0, 3).join('; '));
+  });
+}
+
 console.log('');
 for (const [id, name, st, msg] of results) console.log(`${st.padEnd(6)} #${String(id).padStart(2)} ${name}${msg ? '  -> ' + msg : ''}`);
-console.log(`\nDEEP-AUDIT: ${pass}/50 passed, ${fail} failed`);
+console.log(`\nDEEP-AUDIT: ${pass}/${pass + fail} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

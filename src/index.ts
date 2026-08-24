@@ -25,6 +25,7 @@ import { z as zod } from 'zod';
 import { settingsNamespace } from '@deepseek-ai/dsh-settings';
 import type { Context } from '@deepseek-ai/cordis';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { BUNDLED_TABLE } from './prices-providers.ts';
@@ -77,6 +78,8 @@ const runtimeConfig: {
   priceSourceUrl?: string;
   refreshIntervalMs?: number;
   deepseekApiKey?: string;
+  /** Encrypted-at-rest copy cache (avoids re-encrypting on every persist). */
+  deepseekApiKeyEnc?: string;
 } = {
   currency: 'CNY',
   initialBalance: null,
@@ -98,6 +101,49 @@ let lastRateFetchedAt = 0;
 // ── config persistence ───────────────────────────────────────────────────────
 function configPath(): string {
   return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'usage-meter.json');
+}
+
+// ── secret at-rest encryption (AES-256-CBC, machine-derived key) ────────────
+// The DeepSeek API key never touches the disk in plaintext: it is encrypted
+// with a key derived from a per-install random salt stored NEXT TO the file
+// (obfuscation-grade, instant — protects against casual file reading / sync
+// leakage, not a targeted local attacker who can read this source).
+const SECRET_SALT_PATH = () => join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'usage-meter.salt');
+let cachedSecretKey: Buffer | null = null;
+function secretKey(): Buffer {
+  if (cachedSecretKey !== null) return cachedSecretKey;
+  let salt: string;
+  try {
+    if (existsSync(SECRET_SALT_PATH())) salt = readFileSync(SECRET_SALT_PATH(), 'utf8');
+    else { salt = randomBytes(16).toString('hex'); writeFileSync(SECRET_SALT_PATH(), salt, 'utf8'); }
+  } catch { salt = 'dsh-usage-meter-fallback-salt'; }
+  cachedSecretKey = createHash('sha256').update(`dsh-usage-meter:${salt}`).digest();
+  return cachedSecretKey;
+}
+function encryptSecret(plain: string): string {
+  const iv = randomBytes(16);
+  const cipher = createCipheriv('aes-256-cbc', secretKey(), iv);
+  return `${iv.toString('base64')}:${Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]).toString('base64')}`;
+}
+function decryptSecret(stored: string): string | null {
+  try {
+    const [ivB64, dataB64] = stored.split(':');
+    if (ivB64 === undefined || dataB64 === undefined) return null;
+    const decipher = createDecipheriv('aes-256-cbc', secretKey(), Buffer.from(ivB64, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]).toString('utf8');
+  } catch { return null; }
+}
+
+/** Global settings backed into the extra-state file. The web composition may
+ *  not mount a persistent settings-file provider, so the plugin keeps its own
+ *  restart-surviving copy of every global scalar (API key encrypted). */
+interface PersistedGlobals {
+  currency?: string;
+  budget?: number;
+  initialBalance?: number;
+  priceSourceUrl?: string;
+  refreshIntervalMs?: number;
+  deepseekApiKeyEnc?: string;
 }
 
 const providerConfigs: Record<string, { currency?: string; sharedBalance?: boolean }> = {};
@@ -229,6 +275,7 @@ interface ExtraStateDoc {
   providers?: Record<string, { currency?: string; sharedBalance?: boolean; initialBalance?: number; topUps?: Array<{ amount: number }> }>;
   priceOverrides?: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }>;
   balances?: Record<string, { balance: number; currency: string }>;
+  globals?: PersistedGlobals;
 }
 
 /** Load the EXTRA state from `usage-meter.json` and seed the module maps.
@@ -239,11 +286,16 @@ interface ExtraStateDoc {
  *  extra-state file removes a plaintext-secret leak, and removing the
  *  globals here fixes the two-writers-desync between the popup (file) and the
  *  settings namespace (settings.yaml). */
+/** Globals restored from the file, applied onto the settings scope in `apply()`
+ *  (fields the namespace itself already carries are NOT overwritten). */
+let pendingGlobals: PersistedGlobals | null = null;
+
 function loadPersistedConfig(): void {
   try {
     const p = configPath();
     if (!existsSync(p)) return;
     const doc = JSON.parse(readFileSync(p, 'utf8')) as ExtraStateDoc;
+    if (doc.globals) pendingGlobals = doc.globals;
     if (doc.providers) {
       for (const [provider, cfg] of Object.entries(doc.providers)) {
         const pc: { currency?: string; sharedBalance?: boolean } = {};
@@ -268,11 +320,24 @@ function loadPersistedConfig(): void {
   }
 }
 
-/** Persist the EXTRA state only. Global settings live in the settings namespace
- *  (written via `scope.update`), never duplicated into this file. */
+/** Persist the EXTRA state + a restart-surviving copy of the global scalars
+ *  (API key encrypted). The settings namespace stays canonical in-process; this
+ *  file guarantees the values survive a restart even when the host composition
+ *  lacks a persistent settings-file provider. */
 function savePersistedConfig(): void {
   try {
-    const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances };
+    const globals: PersistedGlobals = {};
+    if (runtimeConfig.currency !== undefined && runtimeConfig.currency !== '') globals.currency = runtimeConfig.currency;
+    if (runtimeConfig.budget !== null) globals.budget = runtimeConfig.budget;
+    if (runtimeConfig.initialBalance !== null) globals.initialBalance = runtimeConfig.initialBalance;
+    if (typeof runtimeConfig.priceSourceUrl === 'string' && runtimeConfig.priceSourceUrl !== '') globals.priceSourceUrl = runtimeConfig.priceSourceUrl;
+    if (typeof runtimeConfig.refreshIntervalMs === 'number') globals.refreshIntervalMs = runtimeConfig.refreshIntervalMs;
+    if (typeof runtimeConfig.deepseekApiKey === 'string' && runtimeConfig.deepseekApiKey !== '') {
+      const enc = encryptSecret(runtimeConfig.deepseekApiKey);
+      if (runtimeConfig.deepseekApiKeyEnc !== enc) runtimeConfig.deepseekApiKeyEnc = enc;
+      globals.deepseekApiKeyEnc = enc;
+    }
+    const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances, globals };
     writeFileSync(configPath(), JSON.stringify(payload, null, 2), 'utf8');
   } catch (err) {
     console.warn('[usage-meter] failed to persist config:', err);
@@ -982,6 +1047,28 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // write path (the popup POST and the settings UI both go through it).
   const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: config });
   meter.applyConfig(scope.get());
+  // Restore globals persisted in the extra-state file when the settings
+  // namespace itself lost them across a restart (web compositions without a
+  // persistent settings-file provider). Namespace values always win.
+  if (pendingGlobals !== null) {
+    const cur = scope.get() as Record<string, unknown>;
+    const restore: Record<string, unknown> = {};
+    const g = pendingGlobals;
+    if (g.initialBalance !== undefined && !(typeof cur.initialBalance === 'number' && cur.initialBalance > 0)) restore.initialBalance = g.initialBalance;
+    if (g.budget !== undefined && !(typeof cur.budget === 'number' && cur.budget > 0)) restore.budget = g.budget;
+    if (g.currency && cur.currency === undefined) restore.currency = g.currency;
+    if (g.priceSourceUrl && (typeof cur.priceSourceUrl !== 'string' || cur.priceSourceUrl === '')) restore.priceSourceUrl = g.priceSourceUrl;
+    if (typeof g.refreshIntervalMs === 'number' && typeof cur.refreshIntervalMs !== 'number') restore.refreshIntervalMs = g.refreshIntervalMs;
+    if (g.deepseekApiKeyEnc !== undefined && (typeof cur.deepseekApiKey !== 'string' || cur.deepseekApiKey === '')) {
+      const plain = decryptSecret(g.deepseekApiKeyEnc);
+      if (plain !== null) restore.deepseekApiKey = plain;
+      else console.warn('[usage-meter] stored DeepSeek API key could not be decrypted (salt changed?); please re-enter it');
+    }
+    pendingGlobals = null;
+    if (Object.keys(restore).length > 0) {
+      void scope.update(restore).then(() => meter.applyConfig(scope.get())).catch((err) => console.warn('[usage-meter] global restore failed:', err));
+    }
+  }
   // Watch the canonical namespace: mirror into runtimeConfig and keep the
   // extra-state file in sync so a settings-page edit survives a restart.
   scope.watch((next: unknown) => {
@@ -1057,6 +1144,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         if (patch.provider !== undefined && patch.provider !== null) {
           const pv = String(patch.provider);
           const pc = providerConfigs[pv] ?? (providerConfigs[pv] = {});
+          // 设置页模型编辑器保存时同步的「显示币种」：驱动弹窗所有金额/单位联动。
+          if (patch.displayCurrency !== undefined && typeof patch.displayCurrency === 'string' && ['CNY', 'USD'].includes(patch.displayCurrency)) {
+            if (pc.currency !== patch.displayCurrency) { pc.currency = patch.displayCurrency; currencyChanged = true; }
+          }
           // 共享余额开关：开启后该供应商所有模型共用一个钱包（p:<provider>）。
           if (patch.sharedBalance !== undefined && typeof patch.sharedBalance === 'boolean' && !isDeepSeekProvider(pv)) {
             pc.sharedBalance = patch.sharedBalance;

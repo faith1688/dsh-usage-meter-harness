@@ -600,6 +600,15 @@ function periodsToWindows(ps: PeakPeriod[]): Array<{ start: number; end: number 
   return out;
 }
 
+/** Direction-aware CNY↔USD conversion (single source of truth for the client;
+ *  mirrors the host's `toDisplay`). */
+function convertAmount(amount: number, from: string, to: string, usdToCny: number): number {
+  if (from === to) return amount;
+  if (from === 'USD' && to === 'CNY') return amount * usdToCny;
+  if (from === 'CNY' && to === 'USD') return usdToCny > 0 ? amount / usdToCny : amount;
+  return amount;
+}
+
 type BalancesDoc = Record<string, { balance?: number; currency?: string }>;
 
 /** One model's full editable state: flat price row, 峰/谷 grid, 币种, 用户余额,
@@ -840,12 +849,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             const b = bals[`m:${k}`] ?? bals[`p:${provider}`];
             if (b !== undefined && typeof b.balance === 'number') {
               const cur = next[k];
-              // Re-convert the ledger value into the editor's CURRENT display
-              // currency, relative to the ledger's OWN currency (a 5s re-poll
-              // must not revert a USD-switched balance, nor double-convert a
-              // ledger that is already in the display currency).
-              const factor = cur !== undefined && typeof b.currency === 'string' && b.currency !== cur.currency ? rateRef.current : 1;
-              next[k] = { ...cur, balance: String(Math.round(b.balance * factor * 1e6) / 1e6) };
+              // 方向感知换算：账本自身币种 → 编辑器当前显示币种（CNY→USD ÷rate，
+              // USD→CNY ×rate；同币种不动）。此前恒 ×rate 导致重开页面时人民币
+              // 余额自己放大 7 倍的 bug。
+              const converted = cur !== undefined && typeof b.currency === 'string' && cur.currency !== b.currency
+                ? convertAmount(b.balance, b.currency, cur.currency, rateRef.current)
+                : b.balance;
+              next[k] = { ...cur, balance: String(Math.round(converted * 1e6) / 1e6) };
             }
           }
           return next;
@@ -946,7 +956,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     // 币种必须显式随价格保存：切到 CNY 后省略字段会让宿主回落基价币种
     // （可能是 USD），已换算成 CNY 的数值就会被按 USD 解释、费用放大汇率倍。
     if (e.currency !== '') prices.currency = e.currency;
-    const body: Record<string, unknown> = { provider, model, prices };
+    const body: Record<string, unknown> = { provider, model, prices, displayCurrency: e.currency };
     const bal = num(e.balance);
     if (!isDeepseekRoute(provider) && bal !== undefined) body.balance = bal;
     return body;
@@ -967,10 +977,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         if (r.ok) { const d = (await r.json()) as { usdToCny?: number }; rate = typeof d.usdToCny === 'number' && d.usdToCny > 0 ? d.usdToCny : 1; rateRef.current = rate; }
       } catch { rate = 1; }
     }
-    const factor = newCur !== cur.baseCurrency ? rate : 1;
     const scale = (v: string): string => {
       const n = Number(v);
-      return v.trim() === '' || Number.isNaN(n) ? '' : String(Math.round(n * factor * 1e6) / 1e6);
+      if (v.trim() === '' || Number.isNaN(n)) return '';
+      // 方向感知换算：baseCurrency→newCur。CNY→USD 必须 ÷rate（此前恒 ×rate
+      // 导致人民币定价模型切 USD 后数值放大 7 倍的 bug）。
+      const converted = newCur === cur.baseCurrency ? n : convertAmount(n, cur.baseCurrency, newCur, rate);
+      return String(Math.round(converted * 1e6) / 1e6);
     };
     setEdits((s) => {
       const base = s[key];
@@ -999,12 +1012,23 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // Custom-row edits: keep the canonical base-currency snapshot in sync when the
   // model is currently shown in its PRICING currency, so a currency switch away
   // and back to base restores the user's values (not just the fixed cells).
+  // Bucket picks are unique across rows: picking an already-used bucket SWAPS
+  // it with the other row (each row keeps its own radio group — groups are
+  // named per-row, so row 2's pick never clears row 1's).
   const editCustomRow = (key: string, ri: number, updater: (r: CustomRow) => CustomRow): void => {
     setEdits((s) => {
       const cur = s[key];
       if (cur === undefined) return s;
       const inBase = cur.currency === cur.baseCurrency;
-      const rows = cur.customRows.map((x, i) => (i === ri ? updater(x) : x));
+      let rows = cur.customRows.map((x, i) => (i === ri ? updater(x) : x));
+      const picked = rows[ri]?.bucket;
+      if (picked !== undefined) {
+        const owner = rows.findIndex((x, i) => i !== ri && x.bucket === picked);
+        if (owner >= 0) {
+          const prev = cur.customRows[ri].bucket;
+          rows = rows.map((x, i) => (i === owner ? { ...x, bucket: prev } : x));
+        }
+      }
       return { ...s, [key]: { ...cur, customRows: rows, baseCustomRows: inBase ? rows : cur.baseCustomRows } };
     });
   };
@@ -1355,7 +1379,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                             const disabled = usedElsewhere.has(b);
                                             return (
                                               <label key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: disabled ? 'not-allowed' as const : 'pointer' as const, fontSize: 11, color: disabled ? t.text3 : t.text }}>
-                                                <input type="radio" name={`um-cb-${k}`} checked={r.bucket === b}
+                                                <input type="radio" name={`um-cb-${k}-${ri}`} checked={r.bucket === b}
                                                   disabled={disabled}
                                                   onChange={() => editCustomRow(k, ri, (x) => ({ ...x, bucket: b }))}
                                                   style={{ accentColor: t.accent }} />
