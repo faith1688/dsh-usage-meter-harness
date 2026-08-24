@@ -7,6 +7,8 @@ import path from 'node:path';
 import os from 'node:os';
 
 const NAME = '@faith1688/dsh-usage-meter-harness';
+// Windows: npm 是 npm.cmd 而非 npm.exe，spawn 必须带 .cmd 才能解析
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const profileDir = process.env.DSH_PROFILE_DIR || path.join(os.homedir(), '.dsh', 'profiles', 'web');
 fs.mkdirSync(profileDir, { recursive: true });
 const pkgPath = path.join(profileDir, 'package.json');
@@ -15,7 +17,7 @@ if (!fs.existsSync(pkgPath)) {
 }
 process.chdir(profileDir);
 console.log(`[1/3] Installing ${NAME} into DSH profile: ${profileDir}`);
-execFileSync('npm', ['i', '--verbose', NAME], { stdio: 'inherit' });
+execFileSync(npmCmd, ['i', '--verbose', NAME], { stdio: 'inherit' });
 console.log('[2/3] Registering bundle...');
 const j = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 j.dsh = j.dsh || {};
