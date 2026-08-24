@@ -1060,6 +1060,23 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
           // 共享余额开关：开启后该供应商所有模型共用一个钱包（p:<provider>）。
           if (patch.sharedBalance !== undefined && typeof patch.sharedBalance === 'boolean' && !isDeepSeekProvider(pv)) {
             pc.sharedBalance = patch.sharedBalance;
+            // 开启共享时，把该供应商已有的独立模型钱包（m:<provider>/<model>）
+            // 余额合并进共用钱包，避免切开关后用户看到「余额凭空消失」。
+            if (patch.sharedBalance === true) {
+              const targetKey = `p:${underlyingProvider(pv) ?? pv}`;
+              const prefix = `${targetKey.slice(2)}/`;
+              let merged = 0;
+              for (const k of Object.keys(balances)) {
+                if (!k.startsWith('m:') || !k.slice(2).startsWith(prefix)) continue;
+                const src = balances[k];
+                const dst = balances[targetKey] ?? (balances[targetKey] = { balance: 0, currency: src.currency });
+                const amount = toCurrency(src.balance, src.currency, dst.currency, currentPrices.usdToCny);
+                dst.balance += amount;
+                merged += 1;
+                delete balances[k];
+              }
+              if (merged > 0) ledgerChanged = true;
+            }
           }
           if (patch.currency !== undefined && patch.currency !== pc.currency) {
             pc.currency = String(patch.currency);

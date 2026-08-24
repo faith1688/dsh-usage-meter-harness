@@ -943,7 +943,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     }
     const disc = num(e.discount);
     if (disc !== undefined && disc > 0 && disc < 1) prices.discount = disc;
-    if (e.currency !== 'CNY' && e.currency !== '') prices.currency = e.currency;
+    // 币种必须显式随价格保存：切到 CNY 后省略字段会让宿主回落基价币种
+    // （可能是 USD），已换算成 CNY 的数值就会被按 USD 解释、费用放大汇率倍。
+    if (e.currency !== '') prices.currency = e.currency;
     const body: Record<string, unknown> = { provider, model, prices };
     const bal = num(e.balance);
     if (!isDeepseekRoute(provider) && bal !== undefined) body.balance = bal;
