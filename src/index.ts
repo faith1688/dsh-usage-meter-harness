@@ -1074,8 +1074,8 @@ class UsageMeterCore {
   }
 
   async refreshBalance(): Promise<void> {
-    const envKey = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DEEPSEEK_API_KEY;
-    const apiKey = (this.cfg.deepseekApiKey as string | undefined) ?? envKey;
+    // 只读加密配置里的 Key，不回落 DEEPSEEK_API_KEY 环境变量。
+    const apiKey = this.cfg.deepseekApiKey as string | undefined;
     if (!apiKey) {
       currentBalance = null;
       return;
@@ -1096,9 +1096,9 @@ class UsageMeterCore {
 
 /** Plugin entry: provide the service, register settings + the projection. */
 export function apply(ctx: Context, config: Record<string, unknown> = {}): void {
-  // [diag] trace host apply lifecycle so a silent mount failure is visible
-  console.log('[usage-meter] apply() called; inject=', JSON.stringify(inject));
-  try {
+
+
+
   // Seed the per-provider currency / price overrides / ledger maps from the
   // extra-state file. Global scalars are NOT read here — they resolve through
   // the `usage-meter` settings namespace below (single canonical write path).
@@ -1447,11 +1447,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   void meter.maybeRefresh(false);
-  console.log('[usage-meter] apply() done');
-  } catch (err) {
-    console.error('[usage-meter] apply() THREW:', err);
-    throw err;
-  }
+
+
+
+
+
 }
 
 export { BILLING_TYPES, Config, costBreakdown, costOf, usageCostProjection };
@@ -1467,3 +1467,4 @@ export const __testInternals = {
   priceRowsOf,
   currentPrices,
 };
+

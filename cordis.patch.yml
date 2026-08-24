@@ -1,1 +1,8 @@
-[]
+# @faith1688/dsh-usage-meter-harness bundle patch
+# DSH mounts each plugin by scanning the plugin's own cordis.patch.yml for its
+# `insert` entry; without it the plugin is never mounted (server + client).
+# Keep EXACTLY ONE insert here. A duplicate happens only if a *profile-level*
+# cordis.patch.yml also inserts the same id — never add another copy there.
+- insert:
+    - id: usage-meter
+      name: '@faith1688/dsh-usage-meter-harness'
