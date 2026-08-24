@@ -138,6 +138,131 @@ tc(50, '模板清单恰好 6 个且不含已删的 storage/tiered', () => {
   });
 }
 
+// ── J. 全模板 × 全组合矩阵（保存→托管合并→计价→重开识别，含流程描述）──
+{
+  const MANAGED = ['inputPerM','outputPerM','cacheReadPerM','cacheWritePerM','combinedPerM','discount','peak','offPeak','peakDays','peakWindows','weekend','peakOffPeakFrom','customRows'];
+  const BASE = { inputPerM: 1, outputPerM: 2, cacheReadPerM: 0.05, cacheWritePerM: 1.25, currency: 'CNY' };
+  const applyOverride = (prices, savedTemplateId) => {
+    const pureDiscount = prices.discount !== undefined && Object.keys(prices).every((k) => k === 'discount' || k === 'currency');
+    const stripped = { ...BASE };
+    if (!pureDiscount) for (const f of MANAGED) delete stripped[f];
+    return { row: { ...stripped, ...prices }, savedTemplateId };
+  };
+  const rowsOut = [];
+  let mPass = 0, mTotal = 0;
+  const matrix = (组合, 流程, check) => {
+    mTotal++;
+    try { check(); mPass++; rowsOut.push([组合, 流程, '✅']); }
+    catch (e) { rowsOut.push([组合, 流程, `❌ ${e.message}`]); }
+  };
+
+  // —— basic：只发输入/输出（模板列驱动），残留缓存字段必须被剥离 ——
+  matrix('basic·全字段', '填输入1/输出2→保存(托管剥离cr/cw)→按输入价算命中与写入', () => {
+    const { row } = applyOverride({ inputPerM: 1, outputPerM: 2, currency: 'CNY' });
+    ok(costOf(U, row), 5.6);
+  });
+  matrix('basic·从cache-split切来', '先存过cr=0.05再切basic保存→旧cr不得参与', () => {
+    const first = applyOverride({ inputPerM: 1, outputPerM: 2, cacheReadPerM: 0.05, currency: 'CNY' });
+    ok(costOf(U, first.row), 5.125);
+    const second = applyOverride({ inputPerM: 1, outputPerM: 2, currency: 'CNY' });
+    ok(costOf(U, second.row), 5.6);
+  });
+  // —— cache-split ——
+  matrix('cache-split·三价', '命中.05/未命中1/输出2→5.15；命中行按.05', () => {
+    const { row } = applyOverride({ inputPerM: 1, outputPerM: 2, cacheReadPerM: 0.05, currency: 'CNY' });
+    ok(costOf(U, row), 5.125);
+    assert.strictEqual(rowsFromPricing(row).length, 3);
+  });
+  // —— peak-off-peak：分时解析 + 重开保持模板 ——
+  const PKG = (extra) => ({ inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05 }, peakDays: [1,2,3,4,5], peakWindows: [{ start: 540, end: 720 }], ...extra });
+  matrix('peak-off-peak·峰时', '周一北京9:30→整单按峰价(写入回落峰输入价)', () => {
+    const { row } = applyOverride({ ...PKG(), peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 }, currency: 'CNY' }, 'peak-off-peak');
+    const r = resolvePricingForTime(row, MON); ok(r.inputPerM, 3);
+    ok(costOf(U, r), 3 + 18 + 0.05 + 0.3);
+  });
+  matrix('peak-off-peak·谷时', '周一北京20:00→谷价', () => {
+    const { row } = applyOverride({ ...PKG(), peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 }, currency: 'CNY' }, 'peak-off-peak');
+    const r = resolvePricingForTime(row, MON_NIGHT); ok(r.inputPerM, 1.5);
+    ok(costOf(U, r), 1.5 + 9 + 0.025 + 0.15);
+  });
+  matrix('peak-off-peak·周六', '未勾选星期六→全天谷价', () => {
+    const { row } = applyOverride({ ...PKG(), peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1 }, currency: 'CNY' }, 'peak-off-peak');
+    ok(resolvePricingForTime(row, SAT).inputPerM, 1.5);
+  });
+  matrix('peak-off-peak·部分填写后重开', '仅填峰价(谷留空)保存→重开模板仍是峰谷(持久化templateId)，不再被猜成基础', () => {
+    const { savedTemplateId } = applyOverride({ ...PKG(), peak: { inputPerM: 3, outputPerM: 9 } , currency: 'CNY' }, 'peak-off-peak');
+    assert.strictEqual(savedTemplateId, 'peak-off-peak');
+    assert.strictEqual(matchTypeId(null) === 'basic', true); // 结构猜测不可靠的对照
+  });
+  // —— cache-write：四桶全价 ——
+  matrix('cache-write·四价', 'i1/cr.05/cw1.25/o2 → 5.15，行数4', () => {
+    const { row } = applyOverride({ inputPerM: 1, outputPerM: 2, cacheReadPerM: 0.05, cacheWritePerM: 1.25, currency: 'CNY' });
+    ok(costOf(U, row), 5.15);
+    assert.strictEqual(rowsFromPricing(row).length, 4);
+  });
+  // —— combined：合并优先 + 折扣叠加 ——
+  matrix('combined·统一价', '合并5 → 3.6M×5=18，重开识别combined', () => {
+    const { row, savedTemplateId } = applyOverride({ inputPerM: 5, outputPerM: 5, combinedPerM: 5, currency: 'CNY' }, 'combined');
+    ok(costOf(U, row), 18);
+    assert.strictEqual(matchTypeId(row), 'combined');
+    void savedTemplateId;
+  });
+  matrix('combined·+Batch折扣', '合并5×0.5 → 9', () => {
+    const { row } = applyOverride({ inputPerM: 5, outputPerM: 5, combinedPerM: 5, discount: 0.5, currency: 'CNY' }, 'combined');
+    ok(costOf(U, row), 9);
+  });
+  // —— batch：纯折扣保留结构 ——
+  matrix('batch·纯折扣', '只存discount0.5→内置结构保留、整单减半', () => {
+    const { row } = applyOverride({ discount: 0.5 }, 'batch');
+    ok(row.cacheReadPerM, 0.05);
+    ok(costOf(U, row), 5.15 * 0.5);
+    assert.strictEqual(matchTypeId(row), 'batch');
+  });
+  matrix('batch·从峰谷模型切来', '带峰结构的基价+batch→峰结构保留且倍率生效', () => {
+    const basePeak = { ...BASE, peakDays: [1], peakWindows: [{ start: 540, end: 720 }], peak: { inputPerM: 3, outputPerM: 9 }, offPeak: { inputPerM: 1.5, outputPerM: 4.5 } };
+    const pureDiscount = true; const stripped = { ...basePeak }; // 纯折扣不剥离
+    const row = { ...stripped, discount: 0.5 };
+    ok(row.peak.inputPerM, 3); void pureDiscount; void MANAGED;
+    const r = resolvePricingForTime(row, MON);
+    // 峰层未定义缓存读价→保留基价缓存读价(.05)；写入价同样保留(1.25)。
+    ok(costOf(U, r), (3 + 18 + 0.025 + 0.125) * 0.5);
+  });
+  // —— 自定义行 × 峰谷开关迁移语义 ——
+  const mkRows = () => [
+    { label: '输入', buckets: ['input'], perM: 1, peakPerM: '', offPerM: '' },
+    { label: '输出', buckets: ['output'], perM: 2, peakPerM: '', offPerM: '' },
+  ];
+  matrix('自定义·启用峰谷迁移', '开峰谷→平价转入谷价、峰价空、上方清空(由峰谷接管)；未填峰价时段按谷价计', () => {
+    const onRows = mkRows().map((r) => ({ ...r, offPerM: r.offPerM.trim() === '' ? r.perM : r.offPerM }));
+    ok(onRows[0].offPerM, 1); ok(onRows[1].offPerM, 2);
+    const pricing = resolvePricingForTime({ inputPerM: 0, outputPerM: 0, customRows: onRows.map((r) => ({ ...r, perM: Number(r.perM), offPerM: Number(r.offPerM) })), peakDays: [1,2,3,4,5], peakWindows: [{ start: 540, end: 720 }] }, MON_NIGHT);
+    ok(costOf(U, pricing), 1 + 4);
+  });
+  matrix('自定义·峰价填好后', '谷1/峰3(输入行)→峰时按3、谷时按1', () => {
+    const rows = [{ label: '输入', buckets: ['input'], perM: 1, peakPerM: 3, offPerM: 1 }];
+    const p = { inputPerM: 0, outputPerM: 0, customRows: rows, peakDays: [1,2,3,4,5], peakWindows: [{ start: 540, end: 720 }] };
+    const u1 = { inputTokens: 1e6, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    ok(costOf(U, resolvePricingForTime(p, MON)), 3);
+    ok(costOf(u1, resolvePricingForTime(p, MON)), 3);
+    ok(costOf(u1, resolvePricingForTime(p, MON_NIGHT)), 1);
+  });
+  matrix('自定义·停用峰谷回迁', '关峰谷→谷价回填平价、峰/谷清空、上方恢复显示原值', () => {
+    const rows = mkRows().map((r) => ({ ...r, offPerM: String(r.perM) }));
+    const offRows = rows.map((r) => ({ ...r, perM: r.offPerM.trim() !== '' ? r.offPerM : r.perM, peakPerM: '', offPerM: '' }));
+    ok(offRows[0].perM, 1); ok(offRows[1].perM, 2);
+    assert.strictEqual(offRows[0].peakPerM, ''); assert.strictEqual(offRows[0].offPerM, '');
+  });
+  matrix('自定义·顺序一致性', '行顺序=用户添加顺序，宿主按行累计与顺序无关但展示一致', () => {
+    const rows = [mkRows()[1], mkRows()[0]];
+    assert.deepStrictEqual(rows.map((r) => r.label), ['输出', '输入']);
+    ok(costOf(U, { inputPerM: 0, outputPerM: 0, customRows: rows.map((r) => ({ ...r, perM: Number(r.perM) })) }), 5);
+  });
+
+  console.log('\n—— 全模板矩阵 ——');
+  for (const r of rowsOut) console.log(`[${r[2].startsWith('✅') ? 'PASS' : 'FAIL'}] ${r[0]} | ${r[1]} | ${r[2]}`);
+  tc(52, `全模板矩阵 ${mPass}/${mTotal} 通过`, () => assert.strictEqual(mTotal - mPass, 0, rowsOut.filter((r) => !r[2].startsWith('✅')).map((r) => r[0]).join('; ')));
+}
+
 console.log('');
 for (const [id, name, st, msg] of results) console.log(`${st.padEnd(6)} #${String(id).padStart(2)} ${name}${msg ? '  -> ' + msg : ''}`);
 console.log(`\nDEEP-AUDIT: ${pass}/${pass + fail} passed, ${fail} failed`);

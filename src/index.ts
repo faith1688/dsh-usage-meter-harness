@@ -202,7 +202,7 @@ function broadcastBalance(_key: string, _entry: { balance: number; currency: str
 /** Live sessions seen by this plugin — kept for the (now in-memory-only) push path. */
 const activeSessions = new Set<object>();
 
-const priceOverrides: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }> = {};
+const priceOverrides: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string }> = {};
 
 /** The billing fields a user override OWNS. When an override exists it must be
  *  the AUTHORITATIVE cost model: these fields are stripped from the bundled
@@ -1234,9 +1234,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
             if (BUNDLED_TABLE[key as PriceKey] !== undefined) currentPrices.table.merge({ [key as PriceKey]: BUNDLED_TABLE[key as PriceKey] as unknown as ModelPricing });
             else currentPrices.table.removeRaw(key);
           } else {
-            const next = { ...(priceOverrides[key] ?? {}) };
+            const next = { ...(priceOverrides[key] ?? {}) } as { prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string };
             if (override.prices !== undefined) next.prices = { ...(override.prices as Partial<ModelPricing>) };
             if (override.rows !== undefined) next.rows = [...(override.rows as BillingRow[])];
+            if (typeof override.templateId === 'string') next.templateId = override.templateId;
             priceOverrides[key] = next;
             applyPriceOverrides();
           }

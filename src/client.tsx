@@ -515,7 +515,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
 /** One provider entry from `GET /api/usage-meter/models`. */
 type ModelDirEntry = { provider: string; label: string; models: Array<{ model: string; label: string }> };
 /** Shape of one saved price override returned by `GET /api/usage-meter/config`. */
-type PriceOverrideEntry = { prices?: Record<string, unknown>; rows?: unknown };
+type PriceOverrideEntry = { prices?: Record<string, unknown>; rows?: unknown; templateId?: string };
 /** Per-model editable price draft (input/cacheHit/output). */
 type ModelSaveState = { ok: boolean; msg: string };
 
@@ -706,6 +706,9 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     peakPerM: typeof r?.peakPerM === 'number' ? n(r.peakPerM) : '',
     offPerM: typeof r?.offPerM === 'number' ? n(r.offPerM) : '',
   }));
+  // 模板选择持久化：优先用上次保存时显式选择的模板，绝不让 matchTypeId 的
+  // 结构猜测改写用户的选择（此前峰谷模板保存后被重置的根因）。
+  const savedTpl = typeof ov[key]?.templateId === 'string' ? (ov[key].templateId as string) : undefined;
   return {
     input: flatInput, cache: flatCache, cacheWrite: flatCacheWrite, output: flatOutput,
     inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
@@ -724,7 +727,9 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
     days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : OFFICIAL_DAYS,
     windows: windowsToPeriods(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
-    templateId: isCustom ? '' : (pe !== undefined ? matchTypeId(pe as unknown as Parameters<typeof matchTypeId>[0]) : ''),
+    // 模板选择持久化：优先用上次保存时显式选择的模板（savedTpl 见上方声明），
+    // 绝不让 matchTypeId 的结构猜测改写用户的选择。
+    templateId: isCustom ? '' : (savedTpl !== undefined && savedTpl !== '' ? savedTpl : (pe !== undefined ? matchTypeId(pe as unknown as Parameters<typeof matchTypeId>[0]) : '')),
     customRows,
     baseCustomRows: customRows,
     combined: pe?.combinedPerM !== undefined,
@@ -947,6 +952,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     // R5 自定义单价项：发送用户定义的行（宿主按行累计计价）。
     if (e.templateId === '' && e.customRows.length > 0) {
       const rows = e.customRows
+        .map((r) => (e.peakOn && num(r.perM) === undefined ? { ...r, perM: r.offPerM.trim() !== '' ? r.offPerM : r.peakPerM } : r))
         .filter((r) => num(r.perM) !== undefined)
         .map((r) => ({
           label: CUSTOM_BUCKET_LABEL[r.bucket],
@@ -962,7 +968,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     // 币种必须显式随价格保存：切到 CNY 后省略字段会让宿主回落基价币种
     // （可能是 USD），已换算成 CNY 的数值就会被按 USD 解释、费用放大汇率倍。
     if (e.currency !== '') prices.currency = e.currency;
-    const body: Record<string, unknown> = { provider, model, prices, displayCurrency: e.currency };
+    const body: Record<string, unknown> = { provider, model, prices, displayCurrency: e.currency, templateId: e.templateId };
     // 保存语义：当前显示的一切原样落盘——余额数值 + 它的币种一起写，宿主按
     // 该币种建账（不做任何二次换算）。
     if (!isDeepseekRoute(provider)) {
@@ -1432,9 +1438,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                             );
                                           })}
                                           <span style={{ fontSize: 11, color: t.text2, minWidth: 56 }}>＝ {CUSTOM_BUCKET_LABEL[r.bucket]}</span>
-                                          <input value={r.perM} placeholder="元/M"
-                                            onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, perM: ev.target.value }))}
-                                            style={{ ...input, maxWidth: 80, fontSize: 12, padding: '3px 6px' }} />
+                                          {e.peakOn ? (
+                                            <span style={{ fontSize: 11, color: t.text3, minWidth: 80, textAlign: 'right' as const }}>峰谷接管 →</span>
+                                          ) : (
+                                            <input value={r.perM} placeholder="元/M"
+                                              onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, perM: ev.target.value }))}
+                                              style={{ ...input, maxWidth: 80, fontSize: 12, padding: '3px 6px' }} />
+                                          )}
                                           <button type="button"
                                             onClick={() => delCustomRow(k, ri)}
                                             style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>删</button>
@@ -1476,7 +1486,21 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                       <>
                                         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' as const }}>
                                           <input type="checkbox" checked={e.peakOn}
-                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, peakOn: ev.target.checked } }))}
+                                            onChange={(ev) => {
+                                              const on = ev.target.checked;
+                                              setEdits((s) => {
+                                                const cur = s[k];
+                                                if (cur === undefined) return s;
+                                                if (cur.templateId !== '') return { ...s, [k]: { ...cur, peakOn: on } };
+                                                // 自定义模板迁移：启用 → 各行平价转入谷价（峰价留空待填），
+                                                // 上方单价由谷价接管；停用 → 谷价回填为平价，清空峰/谷。
+                                                const rows = on
+                                                  ? cur.customRows.map((r) => ({ ...r, offPerM: r.offPerM.trim() === '' ? r.perM : r.offPerM }))
+                                                  : cur.customRows.map((r) => ({ ...r, perM: r.offPerM.trim() !== '' ? r.offPerM : (r.perM.trim() !== '' ? r.perM : r.peakPerM), peakPerM: '', offPerM: '' }));
+                                                const inBase = cur.currency === cur.baseCurrency;
+                                                return { ...s, [k]: { ...cur, peakOn: on, customRows: rows, baseCustomRows: inBase ? rows : cur.baseCustomRows } };
+                                              });
+                                            }}
                                             style={{ accentColor: t.accent }} />
                                           <span style={{ fontSize: 12, color: t.text2 }}>启用峰谷计费</span>
                                         </label>
