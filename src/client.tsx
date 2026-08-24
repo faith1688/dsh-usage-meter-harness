@@ -390,7 +390,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             zIndex: 40,
             width: 620,
             maxWidth: 'calc(100vw - 32px)',
-            background: 'linear-gradient(180deg, #eef4ff 0%, #ffffff 100%)',
+            background: 'linear-gradient(180deg, #e2ebff 0%, #f6f8ff 45%, #ffffff 100%)',
             border: '1px solid rgba(77,107,254,0.35)',
             borderRadius: 12,
             boxShadow: '0 12px 32px rgba(31, 35, 40, 0.18), 0 0 26px rgba(77,107,254,0.16)',
@@ -401,7 +401,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           }}
         >
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: t.brand }}>{usage.model ?? L('未选择模型')}</span>
+            <span style={{ fontWeight: 700, fontSize: 13, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{usage.model ?? L('未选择模型')}</span>
             <span style={{ color: t.text3, fontSize: 11 }}>{usage.provider ?? ''}</span>
           </div>
           <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>
@@ -1315,7 +1315,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const formLabel: CSSProperties = { width: LABEL_W, minWidth: LABEL_W, fontSize: 13, color: t.brand, textAlign: 'right', whiteSpace: 'nowrap' };
   const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.brand, margin: '0 0 6px' };
   const hint: CSSProperties = { fontSize: 11, color: t.text3, lineHeight: 1.5 };
-  const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.brand, color: '#ffffff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(31,35,40,0.15)' };
+  const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: 'linear-gradient(90deg, #4d6bfe 0%, #7c5cff 100%)', color: '#ffffff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(31,35,40,0.15), 0 0 12px rgba(77,107,254,0.35)' };
   const btnGhost: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: 'transparent', color: t.text2, fontSize: 13, cursor: 'pointer' };
   const btnSmall: CSSProperties = { height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: 'transparent', color: t.text2, fontSize: 12, cursor: 'pointer' };
 
@@ -1410,7 +1410,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: 'none', background: saving ? 'rgba(139,148,158,0.45)' : t.brand, color: '#ffffff', fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
+            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: 'none', background: saving ? 'rgba(139,148,158,0.45)' : 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
               {saving ? tt('savingUnit') : tt('save')}
             </button>            {saveMsg !== '' && (
               <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
@@ -1423,7 +1423,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${t.borderSoft}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2, color: t.brand }}>{L('用量计量 · 模型配置')}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{L('用量计量 · 模型配置')}</div>
                 <div style={{ color: t.text3, fontSize: 11, marginBottom: 0 }}>
                   {L('按供应商 → 模型为每个模型单独设置币种、用户余额、单价（含峰谷价对）、生效星期与高峰时段。')}
                 </div>
@@ -1436,7 +1436,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                     type="button"
                     onClick={() => void saveAllModels()}
                     disabled={savingAll}
-                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: 'none', background: savingAll ? 'rgba(139,148,158,0.45)' : t.brand, color: '#ffffff', fontWeight: 600, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: 'none', background: savingAll ? 'rgba(139,148,158,0.45)' : 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', fontWeight: 600, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
                     {savingAll ? 'saving' : L('一键保存全部')}
                   </button>
@@ -1488,12 +1488,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
                         const cell: CSSProperties = { width: '100%', minWidth: 80, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
                         return (
-                          <div key={m.model} style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(77,107,254,0.06), 0 2px 12px rgba(31,35,40,0.08), 0 0 20px rgba(77,107,254,0.12)', background: 'linear-gradient(180deg, rgba(77,107,254,0.05), rgba(77,107,254,0.01))' }}>
+                          <div key={m.model} style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(77,107,254,0.06), 0 2px 12px rgba(31,35,40,0.08), 0 0 20px rgba(77,107,254,0.12)', background: 'linear-gradient(180deg, rgba(77,107,254,0.08), rgba(124,92,255,0.02))' }}>
                             {/* 折叠头部 */}
                             <button
                               type="button"
                               onClick={() => setExpanded((s) => ({ ...s, [k]: !isOpen }))}
-                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(77,107,254,0.03))' : 'rgba(77,107,254,0.05)', color: t.text, cursor: 'pointer', borderBottom: isOpen ? '1px solid rgba(77,107,254,0.15)' : 'none' }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? 'linear-gradient(90deg, rgba(77,107,254,0.22), rgba(124,92,255,0.08))' : 'rgba(77,107,254,0.05)', color: t.text, cursor: 'pointer', borderBottom: isOpen ? '1px solid rgba(77,107,254,0.15)' : 'none' }}
                             >
                               <span style={{ fontSize: 10, color: t.brand }}>{isOpen ? '▼' : '▶'}</span>
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: t.brand, fontWeight: 600 }}>{m.label}</span>
@@ -1505,7 +1505,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             {isOpen && (
                               <>
                               <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
-                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, opacity: locked ? 0.75 : undefined, background: 'linear-gradient(180deg, rgba(77,107,254,0.04), rgba(77,107,254,0.006))' }}>
+                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, opacity: locked ? 0.75 : undefined, background: 'linear-gradient(180deg, rgba(77,107,254,0.06), rgba(124,92,255,0.015))' }}>
                                 {locked && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('lockedHint')}</div>
                                 )}
