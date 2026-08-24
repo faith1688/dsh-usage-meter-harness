@@ -32,24 +32,23 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 
 (`--verbose` shows the install progress.)
 
-### Method 3 — plain npm, no pnpm (verbose by default)
+### Method 3 — one-line installer script, no pnpm
 
-Install directly into the DSH web profile, then register the bundle:
+Windows (cmd):
+
+```bat
+curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/main/scripts/install.cmd -o "%TEMP%\um-install.cmd" && "%TEMP%\um-install.cmd"
+```
+
+Linux / macOS:
 
 ```bash
-cd %USERPROFILE%\.dsh\profiles\web
-npm i @faith1688/dsh-usage-meter-harness
+curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/main/scripts/install.sh | sh
 ```
 
-Open `package.json` in that same folder and add the plugin to the
-`dsh.profile.bundles` array:
-
-```json
-"dsh": { "profile": { "bundles": [ /* ...existing... */, "@faith1688/dsh-usage-meter-harness" ] } }
-```
-
-> Important: `npm i` must run inside the DSH profile folder — installing it in
-> your home directory puts the package in the wrong place and DSH will not load it.
+The script does everything for you: `cd` into the DSH web profile, installs the
+package with visible progress, and registers the bundle in `dsh.profile.bundles`
+(idempotent — safe to re-run after upgrades).
 
 After any method: **restart `dsh web`**.
 

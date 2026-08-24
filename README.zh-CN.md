@@ -32,23 +32,22 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 
 （`--verbose` 显示安装进度。）
 
-### 方式三 —— 纯 npm，不需要 pnpm（npm 默认显示进度）
+### 方式三 —— 一键安装脚本，不需要 pnpm
 
-直接装进 DSH web profile，再手动注册 bundle：
+Windows（cmd）：
+
+```bat
+curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/main/scripts/install.cmd -o "%TEMP%\um-install.cmd" && "%TEMP%\um-install.cmd"
+```
+
+Linux / macOS：
 
 ```bash
-cd %USERPROFILE%\.dsh\profiles\web
-npm i @faith1688/dsh-usage-meter-harness
+curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/main/scripts/install.sh | sh
 ```
 
-打开同一目录下的 `package.json`，把插件加进 `dsh.profile.bundles` 数组：
-
-```json
-"dsh": { "profile": { "bundles": [ /* ...原有... */, "@faith1688/dsh-usage-meter-harness" ] } }
-```
-
-> 注意：`npm i` 必须在 DSH 的 profile 目录里执行——装在家目录会把包装到错误位置，
-> DSH 不会加载它。
+脚本会自动完成全部步骤：进入 DSH web profile → 安装包（可见进度）→ 注册
+`dsh.profile.bundles`（幂等，升级后重跑安全）。
 
 任选一种方式后：**重启 `dsh web`**。
 
