@@ -627,11 +627,6 @@ type ModelEditorState = {
    *  used to recompute the cells on a currency switch. */
   base: Record<string, string>;
   balance: string;
-  /** The wallet's NATIVE value & currency (the ledger entry). `balance` is a
-   *  display-only conversion into the editor's current currency; saving always
-   *  sends `balanceNative`, so view conversions can never corrupt the wallet. */
-  balanceNative: number | null;
-  walletCurrency: string;
   peakOn: boolean;
   days: number[];
   /** Structured peak periods (时/分 picks); converted to Beijing-minute windows on save. */
@@ -719,8 +714,6 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     currency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
     baseCurrency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
     balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
-    balanceNative: bal !== undefined && typeof bal.balance === 'number' ? bal.balance : null,
-    walletCurrency: typeof bal?.currency === 'string' && bal.currency !== '' ? bal.currency : (typeof pe?.currency === 'string' && pe.currency !== '' ? pe.currency : 'CNY'),
     base: {
       input: flatInput, cache: flatCache, cacheWrite: flatCacheWrite, output: flatOutput,
       inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
@@ -862,14 +855,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             const b = bals[`m:${k}`] ?? bals[`p:${provider}`];
             if (b !== undefined && typeof b.balance === 'number') {
               const cur = next[k];
-              // 显示层换算：把钱包原生值换到编辑器当前币种展示。钱包原生值
-              // (balanceNative) 是唯一权威，显示值永远不会被写回钱包。
-              const walletCur = cur?.walletCurrency ?? (typeof b.currency === 'string' ? b.currency : 'CNY');
-              const native = cur?.balanceNative !== null && cur?.balanceNative !== undefined ? cur.balanceNative : b.balance;
+              // 显示层换算：服务端钱包值(其自带币种) → 编辑器当前币种。方向感知；
+              // 同币种原样。切回锚定币种时编辑器会直接还原 base 原值，不经过这里。
+              const walletCur = typeof b.currency === 'string' && b.currency !== '' ? b.currency : 'CNY';
               const converted = cur !== undefined && cur.currency !== walletCur
-                ? convertAmount(native, walletCur, cur.currency, rateRef.current)
-                : native;
-              if (cur !== undefined) next[k] = { ...cur, balance: String(Math.round(converted * 1e6) / 1e6), balanceNative: b.balance, walletCurrency: walletCur };
+                ? convertAmount(b.balance, walletCur, cur.currency, rateRef.current)
+                : b.balance;
+              if (cur !== undefined) next[k] = { ...cur, balance: String(Math.round(converted * 1e6) / 1e6) };
             }
           }
           return next;
@@ -971,9 +963,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     // （可能是 USD），已换算成 CNY 的数值就会被按 USD 解释、费用放大汇率倍。
     if (e.currency !== '') prices.currency = e.currency;
     const body: Record<string, unknown> = { provider, model, prices, displayCurrency: e.currency };
-    // 余额永远按钱包原生币种落盘（显示换算不参与保存），杜绝二次换算缩水。
-    if (e.balanceNative !== null) body.balance = e.balanceNative;
-    else { const bal = num(e.balance); if (!isDeepseekRoute(provider) && bal !== undefined) body.balance = bal; }
+    // 保存语义：当前显示的一切原样落盘——余额数值 + 它的币种一起写，宿主按
+    // 该币种建账（不做任何二次换算）。
+    if (!isDeepseekRoute(provider)) {
+      const bal = num(e.balance);
+      if (bal !== undefined) { body.balance = bal; body.balanceCurrency = e.currency === '' ? 'CNY' : e.currency; }
+    }
     return body;
   };
 
@@ -1006,11 +1001,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       const next: ModelEditorState = { ...base, currency: newCur };
       for (const f of NUM_PRICE_FIELDS) next[f] = scale(base.base[f] ?? '');
       next.customRows = base.baseCustomRows.map((r) => ({ ...r, perM: scale(r.perM), peakPerM: scale(r.peakPerM), offPerM: scale(r.offPerM) }));
-      // 余额显示跟随切换：从钱包原生值按方向换算（原生值不动）。
-      if (base.balanceNative !== null) {
-        next.balance = newCur === base.walletCurrency
-          ? String(base.balanceNative)
-          : String(Math.round(convertAmount(base.balanceNative, base.walletCurrency, newCur, rateRef.current) * 1e6) / 1e6);
+      // 余额：锚定 base 快照。切回定价币种 → 直接还原原值（不再乘除汇率）；
+      // 切走 → 从原值按方向换算一次。
+      if (newCur === base.baseCurrency) next.balance = base.base['balance'] ?? '';
+      else {
+        const origin = Number(base.base['balance'] ?? '');
+        if (base.base['balance'] !== undefined && base.base['balance'] !== '' && !Number.isNaN(origin)) {
+          next.balance = String(Math.round(convertAmount(origin, base.baseCurrency, newCur, rateRef.current) * 1e6) / 1e6);
+        }
       }
       return { ...s, [key]: next };
     });
@@ -1024,16 +1022,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setEdits((s) => {
       const cur = s[key];
       if (cur === undefined) return s;
-      if (fld === 'balance') {
-        // 余额输入按「当前显示币种」解释，立即折回钱包原生币种保存；显示值
-        // 只是视图，落盘的永远是原生值。
-        const n = Number(val);
-        const native = val.trim() === '' || Number.isNaN(n)
-          ? null
-          : (cur.currency === cur.walletCurrency ? n : convertAmount(n, cur.currency, cur.walletCurrency, rateRef.current));
-        const baseSync = cur.currency === cur.baseCurrency ? { base: { ...cur.base, balance: val } } : {};
-        return { ...s, [key]: { ...cur, balance: val, balanceNative: native, ...baseSync } };
-      }
       return cur.currency === cur.baseCurrency
         ? { ...s, [key]: { ...cur, [fld]: val, base: { ...cur.base, [fld]: val } } }
         : { ...s, [key]: { ...cur, [fld]: val } };
@@ -1110,9 +1098,18 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     });
     if (res.ok) {
       if (body.balance !== undefined) {
-        setBalances((b) => ({ ...b, [`m:${provider}/${model}`]: { balance: Number(body.balance) } }));
+        setBalances((b) => ({ ...b, [`m:${provider}/${model}`]: { balance: Number(body.balance), currency: typeof body.balanceCurrency === 'string' ? body.balanceCurrency : 'CNY' } }));
       }
       setOverrides((o) => ({ ...o, [k]: { prices: body.prices as Record<string, unknown> } }));
+      // 保存 = 应用：把当前显示值锚定为新的 base 快照（币种一并切换），此后
+      // 的切换/还原都以此为准；弹窗经 displayCurrency 同步为同一币种。
+      setEdits((s) => {
+        const cur = s[k];
+        if (cur === undefined) return s;
+        const base = { ...cur.base };
+        for (const f of NUM_PRICE_FIELDS) base[f] = cur[f];
+        return { ...s, [k]: { ...cur, baseCurrency: cur.currency, base, baseCustomRows: cur.customRows } };
+      });
     }
     return res.ok;
   };

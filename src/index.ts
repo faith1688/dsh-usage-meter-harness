@@ -1198,7 +1198,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
             ledgerEntry = ledgerOf(ledgerKey, pc.currency ?? runtimeConfig.currency);
             if (ledgerKey !== null && ledgerEntry !== null) {
               if (patch.balance !== undefined && Number.isFinite(Number(patch.balance))) {
+                // 设置页「保存单价」语义：显示值 + 其币种一起原样落盘，不换算。
                 ledgerEntry.balance = Number(patch.balance);
+                if (typeof patch.balanceCurrency === 'string' && ['CNY', 'USD'].includes(patch.balanceCurrency)) {
+                  ledgerEntry.currency = patch.balanceCurrency;
+                }
                 ledgerChanged = true;
               }
               if (patch.recharge !== undefined && Number.isFinite(Number(patch.recharge)) && Number(patch.recharge) !== 0) {
