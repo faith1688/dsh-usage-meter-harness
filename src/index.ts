@@ -225,7 +225,11 @@ function applyPriceOverrides(): void {
     if (base === undefined) {
       const p = override.prices;
       const hasCustom = Array.isArray(p.customRows) && p.customRows.length > 0;
-      if ((typeof p.inputPerM !== 'number' || typeof p.outputPerM !== 'number') && !hasCustom) continue;
+      // 纯峰谷模板 override 只有 peak/offPeak 对象、没有平铺 inputPerM/outputPerM。
+      // 这里必须放行这类 override，否则会被 filter 跳过、不进价格表 → 会话定价 null
+      // → “无价格数据”。（本机之前没暴露，因为本机用的是带平铺单价的基础模板。）
+      const hasPeak = p.peak !== undefined || p.offPeak !== undefined;
+      if ((typeof p.inputPerM !== 'number' || typeof p.outputPerM !== 'number') && !hasCustom && !hasPeak) continue;
       const row: ModelPricing = {
         inputPerM: typeof p.inputPerM === 'number' ? p.inputPerM : 0,
         outputPerM: typeof p.outputPerM === 'number' ? p.outputPerM : 0,
