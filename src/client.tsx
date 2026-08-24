@@ -375,11 +375,15 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           </span>
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
-        {rate !== null && (
-          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : rate >= 50 ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #fbbf24, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }) }}>
-            · {tt('speed')} {rate.toFixed(1)} tokens/s
-          </span>
-        )}
+        {rate !== null && (() => {
+          const tier = rate >= 100 ? 'hi' : rate >= 50 ? 'mid' : 'low';
+          const sp = tier === 'hi'
+            ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+            : tier === 'mid'
+              ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }
+              : { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #fbbf24, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' };
+          return <span key={tier} style={{ whiteSpace: 'nowrap', fontWeight: 700, ...sp }}>· {tt('speed')} {rate.toFixed(1)} tokens/s</span>;
+        })()}
         <span style={{ color: t.text3, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease', fontSize: 9 }}>▼</span>
       </button>
 
