@@ -32,7 +32,15 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 
 (`--verbose` shows the install progress.)
 
-### Method 3 — one-line installer script, no pnpm
+### Method 3 — one-line installer, no pnpm (recommended)
+
+`ash
+npx -y @faith1688/dsh-usage-meter-harness
+`
+
+One command: installs into the DSH web profile and registers the bundle (idempotent).
+
+Prefer not to use npx? The same logic ships as scripts in the repo:
 
 Windows (cmd):
 
