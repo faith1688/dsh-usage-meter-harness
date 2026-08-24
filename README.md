@@ -10,22 +10,29 @@ the official DeepSeek models **and** any custom model registered in DSH.
 
 ## Install
 
+> Prerequisite (methods 1 & 2): the DSH CLI itself runs on pnpm — install it once per machine:
+> `npm install -g pnpm` (or `corepack enable`), then verify with `pnpm --version`.
+
 Pick one of the three methods. **Methods 1 and 2 need pnpm** (a one-time machine
 setup used by the DSH CLI itself): `npm install -g pnpm` or `corepack enable`.
 
 ### Method 1 — npm registry via DSH CLI (needs pnpm)
 
 ```bash
-dsh plugin --profile web add @faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness
 ```
+
+(`--verbose` shows the install progress; drop it if you prefer a quiet install.)
 
 ### Method 2 — GitHub via DSH CLI (needs pnpm)
 
 ```bash
-dsh plugin --profile web add github:faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 ```
 
-### Method 3 — plain npm, no pnpm
+(`--verbose` shows the install progress.)
+
+### Method 3 — plain npm, no pnpm (verbose by default)
 
 Install directly into the DSH web profile, then register the bundle:
 
@@ -122,3 +129,11 @@ directly in the plugin UI:
 ## License
 
 MIT © [faith1688](https://github.com/faith1688)
+
+## Privacy
+
+- The plugin makes **no telemetry and no analytics calls**.
+- Network requests are limited to two optional ones: querying the **official
+  DeepSeek balance API** with the API key you configure yourself, and fetching a
+  public USD→CNY exchange rate. Nothing else leaves your machine.
+- The source is MIT-licensed and fully readable on GitHub.

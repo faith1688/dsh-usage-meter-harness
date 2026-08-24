@@ -10,22 +10,29 @@ DeepSeek Harness（DSH）的**实时用量 / 费用 / 余额计量插件**。
 
 ## 安装
 
+> 前置（方式一、二）：DSH CLI 本身基于 pnpm，每台机器装一次即可：
+> `npm install -g pnpm`（或 `corepack enable`），用 `pnpm --version` 验证。
+
 三选一。**方式一和方式二需要 pnpm**（DSH CLI 本身的一次性前置要求，任意插件都一样）：
 `npm install -g pnpm` 或 `corepack enable`。
 
 ### 方式一 —— npm 源（需要 pnpm）
 
 ```bash
-dsh plugin --profile web add @faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness
 ```
+
+（`--verbose` 显示安装进度，可去掉。）
 
 ### 方式二 —— GitHub 源（需要 pnpm）
 
 ```bash
-dsh plugin --profile web add github:faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 ```
 
-### 方式三 —— 纯 npm，不需要 pnpm
+（`--verbose` 显示安装进度。）
+
+### 方式三 —— 纯 npm，不需要 pnpm（npm 默认显示进度）
 
 直接装进 DSH web profile，再手动注册 bundle：
 
@@ -120,3 +127,10 @@ npm i @faith1688/dsh-usage-meter-harness
 ## License
 
 MIT © [faith1688](https://github.com/faith1688)
+
+## 隐私
+
+- 插件**无任何遥测、无统计**。
+- 网络请求仅两处可选：① 用你自己配置的 API Key 查询 **DeepSeek 官方余额接口**；
+  ② 获取公开的 USD→CNY 汇率。除此之外没有任何数据离开你的机器。
+- 源码 MIT 协议，GitHub 上完全可查。
