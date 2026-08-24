@@ -1096,6 +1096,9 @@ class UsageMeterCore {
 
 /** Plugin entry: provide the service, register settings + the projection. */
 export function apply(ctx: Context, config: Record<string, unknown> = {}): void {
+  // [diag] trace host apply lifecycle so a silent mount failure is visible
+  console.log('[usage-meter] apply() called; inject=', JSON.stringify(inject));
+  try {
   // Seed the per-provider currency / price overrides / ledger maps from the
   // extra-state file. Global scalars are NOT read here — they resolve through
   // the `usage-meter` settings namespace below (single canonical write path).
@@ -1444,6 +1447,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   void meter.maybeRefresh(false);
+  console.log('[usage-meter] apply() done');
+  } catch (err) {
+    console.error('[usage-meter] apply() THREW:', err);
+    throw err;
+  }
 }
 
 export { BILLING_TYPES, Config, costBreakdown, costOf, usageCostProjection };
