@@ -19,10 +19,10 @@ DeepSeek Harness（DSH）的**实时用量 / 费用 / 余额计量插件**。
 ### 方式一 —— npm 源（需要 pnpm）
 
 ```bash
-dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness@latest
 ```
 
-（`--verbose` 显示安装进度，可去掉。）
+（`--verbose` 显示安装进度，可去掉。`@latest` 显式请求最新版——请始终这样安装。）
 
 ### 方式二 —— GitHub 源（需要 pnpm）
 
@@ -35,9 +35,10 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 ### 方式三 —— 一行命令安装，不需要 pnpm（推荐）
 
 ```bash
-npx -y @faith1688/dsh-usage-meter-harness
+npx -y @faith1688/dsh-usage-meter-harness@latest
 ```
 一条命令：自动装进 DSH web profile 并注册 bundle（幂等）。
+（`@latest` 显式请求最新版——请始终这样安装。）
 
 不想用 npx？仓库里也带了同样的脚本：
 

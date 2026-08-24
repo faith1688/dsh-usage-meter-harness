@@ -19,10 +19,11 @@ setup used by the DSH CLI itself): `npm install -g pnpm` or `corepack enable`.
 ### Method 1 — npm registry via DSH CLI (needs pnpm)
 
 ```bash
-dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness@latest
 ```
 
-(`--verbose` shows the install progress; drop it if you prefer a quiet install.)
+(`--verbose` shows the install progress; drop it if you prefer a quiet install.
+`@latest` explicitly requests the newest release — always install this way.)
 
 ### Method 2 — GitHub via DSH CLI (needs pnpm)
 
@@ -35,9 +36,10 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 ### Method 3 — one-line installer, no pnpm (recommended)
 
 ```bash
-npx -y @faith1688/dsh-usage-meter-harness
+npx -y @faith1688/dsh-usage-meter-harness@latest
 ```
 One command: installs into the DSH web profile and registers the bundle (idempotent).
+(`@latest` explicitly requests the newest release — always install this way.)
 
 Prefer not to use npx? The same logic ships as scripts in the repo:
 
