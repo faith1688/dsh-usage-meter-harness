@@ -41,6 +41,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 import { costBreakdown } from './projection.ts';
 import type { BillingRow, ModelPricing, UsageCostValue } from './projection.ts';
+import { tt, setLang, getLang, L, type Lang } from './i18n.ts';
 import { matchTypeId } from './billing.ts';
 
 /** Services this client plugin requires on `ctx`. */
@@ -62,7 +63,7 @@ export function apply(ctx: ClientContext): void {
   // composition without the settings UI simply never runs this effect.
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
-      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => '用量计量' },
+      { name: 'settings.section', id: 'usage-meter', order: 20, label: () => L('用量计量') },
       UsageMeterSettingsSection,
     ),
   );
@@ -190,16 +191,16 @@ function turnTokensText(turn: UsageCostValue['turns'][number]): string {
   const total = turn.inputTokens + turn.cacheReadTokens + turn.cacheWriteTokens + turn.outputTokens;
   const stopped = total === 0 && turn.endedAt > 0 && (turn.endReason === 'aborted' || turn.endReason === 'interrupted');
   return stopped
-    ? '对话被停止'
+    ? L('对话被停止')
     : `${formatTokens(total - turn.outputTokens)} 入 / ${formatTokens(turn.outputTokens)} 出`;
 }
 
-function bucketTokens(usage: UsageCostValue, b: BillingRow['buckets'][number]): number {
+function bucketTokens(u: Pick<UsageCostValue, 'inputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'outputTokens'>, b: BillingRow['buckets'][number]): number {
   switch (b) {
-    case 'input': return usage.inputTokens;
-    case 'cacheRead': return usage.cacheReadTokens;
-    case 'cacheWrite': return usage.cacheWriteTokens;
-    case 'output': return usage.outputTokens;
+    case 'input': return u.inputTokens;
+    case 'cacheRead': return u.cacheReadTokens;
+    case 'cacheWrite': return u.cacheWriteTokens;
+    case 'output': return u.outputTokens;
   }
 }
 
@@ -244,14 +245,16 @@ function peakPricePerM(peak: ModelPricing['peak'], b: BillingRow['buckets'][numb
 
 function peakLabel(p: ModelPricing | null): string | null {
   if (p === null || p.peak === undefined || p.offPeak === undefined) return null;
-  if (p.peakOffPeakFrom !== undefined && Date.now() < p.peakOffPeakFrom) return '峰谷价未生效';
+  if (p.peakOffPeakFrom !== undefined && Date.now() < p.peakOffPeakFrom) return L('峰谷价未生效');
   const h = new Date().getUTCHours();
-  return (h >= 1 && h < 4) || (h >= 6 && h < 10) ? '高峰' : '低谷';
+  return (h >= 1 && h < 4) || (h >= 6 && h < 10) ? L('高峰') : L('低谷');
 }
 
 // ── readout ──────────────────────────────────────────────────────────────────
 export function UsageReadout({ useProjection }: DockProps): ReactElement | null {
   const usage: UsageCostValue | undefined = useProjection('usageCost');
+const [, setLangTick] = useState(0);
+useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventListener('um-lang-change', h); return () => window.removeEventListener('um-lang-change', h); }, []);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [rate, setRate] = useState<number | null>(null);
@@ -289,7 +292,15 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
     const id = setInterval(() => {
       const u = usageRef.current;
       if (u === undefined) return;
-      const live = tokenRateOf(rateSamplesRef.current, Date.now());
+      const samples = rateSamplesRef.current;
+      const live = tokenRateOf(samples, Date.now());
+      // 停滞检测：最新样本已滑出窗口（>窗口+1.5s 没有新 token 样本）说明
+      // 输出已停止/工具执行中——清零速度显示，而不是把旧值永远冻结在原地。
+      const newestAt = samples.length > 0 ? samples[samples.length - 1].at : 0;
+      if (live === null && Date.now() - newestAt > RATE_WINDOW_MS + 1500) {
+        setRate(null);
+        return;
+      }
       setRate((previous) => live ?? previous ?? completedTurnRate(u.turns));
     }, RATE_TICK_MS);
     return () => clearInterval(id);
@@ -319,7 +330,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        title="用量 / 费用详情"
+        title={L('用量 / 费用详情')}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -338,18 +349,18 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
         }}
       >
         <span style={{ fontWeight: 600, color: t.text, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {usage.model ?? '未选择模型'}
+          {usage.model ?? L('未选择模型')}
         </span>
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>·</span>
         <span style={{ fontWeight: 700, color: p ? t.brand : t.text3, whiteSpace: 'nowrap' }}>
-          {p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : '无价格'}
+          {p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : L('无价格')}
         </span>
         {(balanceKind !== 'none' || (isDeepSeek && accountBalance === null)) && (
           <span
             title={
               accountBalance !== null
-                ? `${accountBalance.source === 'computed' ? '计算' : '更新'}于 ${fmtTime(accountBalance.updatedAt)}${isDeepSeek ? '（官网余额刷新有延迟）' : ''}${pricesConverted ? ` · 汇率 1USD≈${usage.usdToCny.toFixed(4)}CNY${usage.rateUpdatedAt > 0 ? ` · 更新于 ${fmtTime(usage.rateUpdatedAt)}` : ''}` : ''}`
-                : '等待余额配置…'
+                ? `${(accountBalance.source === 'computed' ? L('计算') : L('更新'))}{L('更新于')} ${fmtTime(accountBalance.updatedAt)}${isDeepSeek ? '（官网余额刷新有延迟）' : ''}${pricesConverted ? ` · ${L('汇率 1USD≈')}${usage.usdToCny.toFixed(4)}CNY${usage.rateUpdatedAt > 0 ? ` · 更新于 ${fmtTime(usage.rateUpdatedAt)}` : ''}` : ''}`
+                : L('等待余额配置…')
             }
             style={{
               fontWeight: 600,
@@ -360,11 +371,11 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
               whiteSpace: 'nowrap',
             }}
           >
-            {accountBalance === null ? (usage.balanceNeedsKey ? '余额 未配置Key' : '余额 获取中…') : `${balanceNegative ? '透支 ' : '余额 '}${fmtBalance(accountBalance, usage)}`}
+            {accountBalance === null ? (usage.balanceNeedsKey ? L('余额 未配置Key') : L('余额 获取中…')) : `${balanceNegative ? L('透支 ') : L('剩余 ')}${fmtBalance(accountBalance, usage)}`}
           </span>
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
-        {rate !== null && <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>· 速度 {rate.toFixed(1)} tokens/s</span>}
+        {rate !== null && <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>· {tt('speed')} {rate.toFixed(1)} tokens/s</span>}
         <span style={{ color: t.text3, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease', fontSize: 9 }}>▼</span>
       </button>
 
@@ -373,9 +384,11 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
           style={{
             position: 'absolute',
             bottom: 'calc(100% + 8px)',
-            left: 0,
+            // 以触发条为锚水平居中（而非左对齐向右展开），视觉上与下方文字整体对齐。
+            left: '50%',
+            transform: 'translateX(-50%)',
             zIndex: 40,
-            width: 480,
+            width: 528,
             maxWidth: 'calc(100vw - 32px)',
             background: t.card,
             border: `1px solid ${t.border}`,
@@ -388,56 +401,58 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
           }}
         >
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>{usage.model ?? '未选择模型'}</span>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>{usage.model ?? L('未选择模型')}</span>
             <span style={{ color: t.text3, fontSize: 11 }}>{usage.provider ?? ''}</span>
           </div>
           <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>
-            价格来源 {p?.source === 'remote' ? '远端' : '内置'} · 更新于{' '}
+            {L('价格来源')} {p?.source === 'remote' ? tt('sourceRemote') : p?.source === 'user' ? tt('sourceUser') : tt('sourceBuiltin')} · {L('更新于')}{' '}
             {p?.updatedAt ? new Date(p.updatedAt).toLocaleString() : '—'}
             {peak !== null ? ` · ${peak}` : ''}
-            {pricesConverted ? ` · 汇率 1USD=${usage.usdToCny.toFixed(4)}CNY` : ''}
+            {pricesConverted ? ` · ${L('汇率 1USD=')}${usage.usdToCny.toFixed(4)}CNY` : ''}
           </div>
 
           <div style={{ ...row, borderBottom: `1px solid ${t.borderSoft}`, paddingTop: 8, paddingBottom: 8 }}>
-            <span style={{ color: t.text2 }}>{balanceKind === 'account' ? '账户余额' : '余额'}</span>
+            <span style={{ color: t.text2 }}>{balanceKind === 'account' ? L('账户余额') : L('余额')}</span>
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
               <span style={{ fontWeight: 800, fontSize: 16, color: balanceKind === 'none' ? t.text3 : balanceNegative ? t.error : t.ok }}>
                 {balanceKind === 'none'
-                  ? isDeepSeek ? (usage.balanceNeedsKey ? '未配置Key' : '获取中…') : '未配置'
+                  ? isDeepSeek ? (usage.balanceNeedsKey ? L('未配置Key') : L('获取中…')) : L('未配置')
                   : accountBalance !== null ? fmtBalance(accountBalance, usage) : '—'}
               </span>
               {accountBalance !== null && accountBalance.updatedAt > 0 && (
-                <span title={isDeepSeek ? '官网余额刷新可能有延迟，余额按「锚点 − 本地消费」实时计算' : '余额 = 账户余额 − 累计消费（全局账本）'} style={{ color: t.text3, fontSize: 10, whiteSpace: 'nowrap' }}>
-                  {accountBalance.source === 'computed' ? '计算' : '更新'}于 {fmtTime(accountBalance.updatedAt)}
-                  {isDeepSeek ? ' · 官网刷新有延迟' : ''}
+                <span title={isDeepSeek ? L('官网余额刷新可能有延迟，余额按「锚点 − 本地消费」实时计算') : L('余额 = 账户余额 − 累计消费（全局账本）')} style={{ color: t.text3, fontSize: 10, whiteSpace: 'nowrap' }}>
+                  {(accountBalance.source === 'computed' ? L('计算') : L('更新'))}{L('更新于')} {fmtTime(accountBalance.updatedAt)}
+                  {isDeepSeek ? L(' · 官网刷新有延迟') : ''}
                 </span>
               )}
               {pricesConverted && balanceKind !== 'none' && (
                 <span style={{ color: t.text3, fontSize: 10, whiteSpace: 'nowrap' }}>
-                  汇率 1USD≈{usage.usdToCny.toFixed(4)}CNY{usage.rateUpdatedAt > 0 ? ` · 更新于 ${fmtTime(usage.rateUpdatedAt)}` : ''}
+{L('汇率 1USD≈')}{usage.usdToCny.toFixed(4)}CNY{usage.rateUpdatedAt > 0 ? ` · ${L('更新于')} ${fmtTime(usage.rateUpdatedAt)}` : ''}
                 </span>
               )}
             </span>
           </div>
 
           <div style={{ ...row, paddingTop: 6 }}>
-            <span style={{ color: t.text2 }}>本次对话费用</span>
-            <span style={{ fontWeight: 700, color: p ? t.brand : t.text3 }}>{p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : '无价格数据'}</span>
+            <span style={{ color: t.text2 }}>{tt('sessionCost')}</span>
+            <span style={{ fontWeight: 700, color: p ? t.brand : t.text3 }}>{p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : tt('noPriceData')}</span>
           </div>
+
+          {/* 明细表即本轮口径（见下方 priceRows 区），不再单列「本轮」行。 */}
 
           {/* budget (src 保留功能) */}
           {usage.budget !== null && (
             <div style={{ borderTop: `1px solid ${t.borderSoft}`, marginTop: 4, paddingTop: 8 }}>
               <div style={{ ...row, paddingTop: 0 }}>
-                <span style={{ color: t.text2 }}>预算 {fmtMoney(usage.budget, usage.currency, usage)}</span>
-                <span style={{ color: t.text3 }}>已用 {fmtMoney(usage.estimatedCost, usage.currency, usage)}</span>
+                <span style={{ color: t.text2 }}>{L('预算')} {fmtMoney(usage.budget, usage.currency, usage)}</span>
+                <span style={{ color: t.text3 }}>{L('已用')} {fmtMoney(usage.estimatedCost, usage.currency, usage)}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, height: 6, borderRadius: 999, background: t.borderSoft, overflow: 'hidden' }}>
                   <div style={{ width: `${Math.round((budgetRatio ?? 0) * 100)}%`, height: '100%', borderRadius: 999, background: overBudget ? t.error : t.brand, transition: 'width .2s ease' }} />
                 </div>
                 <span style={{ fontWeight: 700, color: overBudget ? t.error : t.text, whiteSpace: 'nowrap' }}>
-                  {overBudget ? '超支 ' : '剩余 '}{fmtMoney(Math.abs(remaining ?? 0), usage.currency, usage)}
+                  {overBudget ? L('超支 ') : L('剩余 ')}{fmtMoney(Math.abs(remaining ?? 0), usage.currency, usage)}
                 </span>
               </div>
             </div>
@@ -445,35 +460,48 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
 
           <div style={{ marginTop: 8 }}>
             <div style={{ ...row, paddingBottom: 2, color: t.text3, fontSize: 11 }}>
-              <span style={{ flex: 1 }}>用量</span>
-              <span style={{ width: 92, textAlign: 'right' }}>单价</span>
-              <span style={{ width: 92, textAlign: 'right' }}>小计</span>
+              <span style={{ flex: 1 }}>{tt('turnUsage')}</span>
+              <span style={{ width: 92, textAlign: 'right', color: usage.peakState === 'peak' ? t.error : usage.peakState === 'off' ? t.ok : undefined }}>
+                {tt('unitCol')}{usage.peakState === 'peak' ? tt('peakTag') : usage.peakState === 'off' ? tt('offTag') : ''}
+              </span>
+              <span style={{ width: 92, textAlign: 'right' }}>{tt('turnSubtotal')}</span>
             </div>
-            {usage.priceRows.map((r) => {
-              const primary = r.buckets[0] ?? 'input';
-              const tokens = r.buckets.reduce((s, b) => s + bucketTokens(usage, b), 0);
-              const cost = r.buckets.reduce((s, b) => s + bucketCost(breakdown, b), 0);
-              const price = r.perM ?? bucketPricePerM(p, primary);
-              return <BucketRow key={r.label + r.buckets.join(',')} label={r.label} tokens={tokens} price={price} cost={cost} native={native} usage={usage} accent={primary === 'cacheRead' ? t.ok : undefined} />;
-            })}
-            {usage.reasoningTokens > 0 && (
+            {(() => {
+              // 明细表口径 = 当前轮（lastTurn）：从轮开始零起算。旧宿主无
+              // lastTurn 时回退到会话累计值。小计逐行按「本轮用量×单价×折扣」
+              // 直接计算——不能读 costBreakdown 的桶（customRows 模式下宿主把
+              // 全部金额塞进 input 桶，其余行小计恒为 0，即用户看到的零）。
+              const lt = usage.lastTurn;
+              const tu = lt != null
+                ? { inputTokens: lt.inputTokens, cacheReadTokens: lt.cacheReadTokens, cacheWriteTokens: lt.cacheWriteTokens, outputTokens: lt.outputTokens }
+                : usage;
+              const disc = p !== null && p.discount !== undefined && p.discount < 1 ? p.discount : 1;
+              return usage.priceRows.map((r) => {
+                const primary = r.buckets[0] ?? 'input';
+                const tokens = r.buckets.reduce((s, b) => s + bucketTokens(tu, b), 0);
+                const price = r.perM ?? bucketPricePerM(p, primary);
+                const cost = price !== undefined ? tokens * (price / 1_000_000) * disc : 0;
+                return <BucketRow key={r.label + r.buckets.join(',')} label={L(r.label)} tokens={tokens} price={price} cost={cost} native={native} usage={usage} accent={primary === 'cacheRead' ? t.ok : undefined} />;
+              });
+            })()}
+            {(usage.lastTurn != null ? usage.lastTurn.reasoningTokens : usage.reasoningTokens) > 0 && (
               <div style={{ ...row, color: t.text3, fontSize: 11, paddingTop: 1 }}>
-                <span>推理 {formatTokens(usage.reasoningTokens)}（已含在输出内）</span>
+                <span> {tt('reasoningIncluded')} {formatTokens(usage.lastTurn != null ? usage.lastTurn.reasoningTokens : usage.reasoningTokens)}{tt('includedInOut')}</span>
               </div>
             )}
             {p !== null && p.discount !== undefined && p.discount < 1 && (
-              <div style={{ color: t.brand, fontSize: 10, paddingTop: 2 }}>Batch 半价：小计已按 ×{p.discount} 计算（单价列仍为标准价）</div>
+              <div style={{ color: t.brand, fontSize: 10, paddingTop: 2 }}>{tt('batchHalfNote')}</div>
             )}
           </div>
 
           <div style={{ ...row, color: t.text2, fontSize: 11, borderTop: `1px solid ${t.borderSoft}`, marginTop: 4, paddingTop: 6 }}>
-            <span>请求 {usage.requestCount} 次成功 · {usage.stepCount} 次尝试</span>
-            {hitRate !== null && <span style={{ color: t.text3 }}>缓存命中 {hitRate}%</span>}
+            <span>{L('请求')} {usage.requestCount} {tt('reqOk')} {usage.stepCount} {tt('reqTry')}</span>
+            {hitRate !== null && <span style={{ color: t.text3 }}>{tt('cacheHitPct')} {hitRate}%</span>}
           </div>
 
           {turns.length > 0 && (
             <div style={{ borderTop: `1px solid ${t.borderSoft}`, marginTop: 6, paddingTop: 6 }}>
-              <div style={{ color: t.text3, fontSize: 11, marginBottom: 2 }}>每轮费用（共 {turns.length} 轮）</div>
+              <div style={{ color: t.text3, fontSize: 11, marginBottom: 2 }}>{tt('perTurnCosts')}{turns.length}{tt('turnsTotal')}</div>
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                 {turns.map((turn, i) => {
                   const prev = i > 0 ? turns[i - 1] : undefined;
@@ -535,7 +563,7 @@ const NUM_PRICE_FIELDS = ['input', 'cache', 'cacheWrite', 'output', 'inputPeak',
 
 /** Plain column labels for the template-driven unit-price grid. */
 const FIELD_LABEL: Record<'input' | 'cache' | 'cacheWrite' | 'output', string> = {
-  input: '输入(未命中)', cache: '缓存命中', cacheWrite: '缓存写入', output: '输出',
+  input: L('输入(未命中)'), cache: L('缓存命中'), cacheWrite: L('缓存写入'), output: L('输出'),
 };
 
 /** Custom-row bucket types (radio single-select, one row per bucket, max 4). */
@@ -649,6 +677,8 @@ type ModelEditorState = {
   prefillOfficial?: boolean;
   /** True when this model has no saved price and is not a DeepSeek official model. */
   noSavedPrice?: boolean;
+  /** True when this model bills the provider shared wallet. */
+  usesSharedBalance?: boolean;
 };
 
 /** Known DeepSeek OFFICIAL prices (CNY / 1M tokens), used to pre-fill a fresh
@@ -709,6 +739,10 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
   // 模板选择持久化：优先用上次保存时显式选择的模板，绝不让 matchTypeId 的
   // 结构猜测改写用户的选择（此前峰谷模板保存后被重置的根因）。
   const savedTpl = typeof ov[key]?.templateId === 'string' ? (ov[key].templateId as string) : undefined;
+  // 自定义行模式的峰谷价存在各行的 peakPerM/offPerM 上（宿主 resolvePricingForTime
+  // 的 hasRowPeak 同款判定）。只看 pricing.peak/offPeak 会在保存后重播种时把
+  // 「启用峰谷计费」错误地重置为关。
+  const hasRowPeak = (rawCustom ?? []).some((r) => r?.peakPerM !== undefined || r?.offPerM !== undefined);
   return {
     input: flatInput, cache: flatCache, cacheWrite: flatCacheWrite, output: flatOutput,
     inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
@@ -724,7 +758,7 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
       outPeak: peak.op || flatOutput, outOff: off.op || flatOutput,
       balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
     },
-    peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
+    peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined || hasRowPeak),
     days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : OFFICIAL_DAYS,
     windows: windowsToPeriods(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
     // 模板选择持久化：优先用上次保存时显式选择的模板（savedTpl 见上方声明），
@@ -738,7 +772,8 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
     // a friendly "已按官方价预填，可修改后保存" hint) vs a non-official model
     // with no saved price (→ prompt the user to fill it in).
     prefillOfficial: official !== undefined && !savedOverride,
-    noSavedPrice: !savedOverride && official === undefined,
+    noSavedPrice: !savedOverride && official === undefined && !hasBal(bals[`p:${provider}`]),
+    usesSharedBalance: hasBal(bals[`p:${provider}`]),
   };
 }
 
@@ -753,7 +788,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // re-convert the ledger value into the editor's current display currency, so a
   // switch to USD does NOT revert to the raw CNY number a few seconds later.
   const rateRef = useRef(7.2);
-  const [initialBalance, setInitialBalance] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   // 当前汇率 + 获取时间（来自宿主；设置页展示用）。
@@ -766,12 +800,22 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [overrides, setOverrides] = useState<Record<string, PriceOverrideEntry>>({});
   const [balances, setBalances] = useState<BalancesDoc>({});
   const [edits, setEdits] = useState<Record<string, ModelEditorState>>({});
+  // 用户手动改过「用户余额」的草稿 key 集合：R2 轮询不得覆盖这些输入（用户
+  // 期望输入即改、点保存才落盘；轮询覆盖会在几秒内把输入刷回服务端旧值）。
+  const balanceDirtyRef = useRef<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [saveStates, setSaveStates] = useState<Record<string, ModelSaveState>>({});
   const [savingAll, setSavingAll] = useState(false);
+  const [lang, setLangState] = useState<Lang>(getLang());
+  const bump = () => setForce((v) => v + 1);
+  const [, setForce] = useState(0);
+  useEffect(() => { const h = () => setForce((v) => v + 1); window.addEventListener('um-lang-change', h); return () => window.removeEventListener('um-lang-change', h); }, []);
   // 共享余额：provider id → 该供应商下所有模型是否共用一个余额钱包（默认关）。
   const [sharedBalances, setSharedBalances] = useState<Record<string, boolean>>({});
   const [templates, setTemplates] = useState<Array<{ id: string; label: string; rows: BillingRow[]; mode: string; peak?: boolean; note?: string }>>([]);
+  // 当前正在使用（轮次进行中）的模型 key：设置页据此锁定该模型的编辑。
+  const [activeKey, setActiveKey] = useState('');
+  const activeKeyRef = useRef('');
 
   useEffect(() => {
     void (async () => {
@@ -789,7 +833,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     void (async () => {
       try {
         const res = await fetch('/api/usage-meter/config');
-        if (!res.ok) { setLoadError(`加载失败 (${res.status})`); return; }
+        if (!res.ok) { setLoadError(L('加载失败 (') + `${res.status})`); return; }
         const doc = (await res.json()) as {
           config?: Record<string, unknown>;
           providers?: Record<string, { currency?: string; sharedBalance?: boolean }>;
@@ -803,7 +847,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         if (cancelled) return;
         const c = doc.config ?? {};
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
-        setInitialBalance(get(c.initialBalance));
         setKeySaved(c.deepseekApiKey === '***');
         setOverrides(doc.priceOverrides ?? {});
         setBalances(doc.balances ?? {});
@@ -811,7 +854,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         for (const [pv, pc] of Object.entries(doc.providers ?? {})) if (pc.sharedBalance === true) sb[pv] = true;
         setSharedBalances(sb);
       } catch (err) {
-        if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
+        if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError(L('加载失败')); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -866,7 +909,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
               const converted = cur !== undefined && cur.currency !== walletCur
                 ? convertAmount(b.balance, walletCur, cur.currency, rateRef.current)
                 : b.balance;
-              if (cur !== undefined) next[k] = { ...cur, balance: String(Math.round(converted * 1e6) / 1e6) };
+              if (cur !== undefined && !balanceDirtyRef.current.has(k)) next[k] = { ...cur, balance: String(Math.round(converted * 1e6) / 1e6) };
             }
           }
           return next;
@@ -877,16 +920,53 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // 草稿初值：从已存的 override + 余额账本预填（目录/override/余额变化时重置）
+  // 草稿初值：从已存的 override + 余额账本预填（目录/override/余额变化时重置）。
+  // 关键：只重置「底层数据真的变了」的键——保存模型 A 会更新 overrides/balances
+  // 并触发本副作用，绝不能把用户在模型 B 里未保存的草稿一并冲掉。
+  const draftSigsRef = useRef<Record<string, string>>({});
   useEffect(() => {
-    const d: Record<string, ModelEditorState> = {};
-    for (const p of modelDir) {
-      for (const m of p.models) {
-        d[draftKeyOf(p.provider, m.model)] = seedEntry(draftKeyOf(p.provider, m.model), overrides, balances);
+    const sigOf = (k: string): string => {
+      const o = overrides[k];
+      const bm = balances[`m:${k}`];
+      const pv = k.split('/')[0];
+      const bp = balances[`p:${pv}`];
+      return JSON.stringify([o?.prices ?? null, o?.rows ?? null, o?.templateId ?? null, bm ?? bp ?? null]);
+    };
+    setEdits((prev) => {
+      const d: Record<string, ModelEditorState> = {};
+      const sigs: Record<string, string> = {};
+      for (const p of modelDir) {
+        for (const m of p.models) {
+          const k = draftKeyOf(p.provider, m.model);
+          sigs[k] = sigOf(k);
+          // 底层数据没变 + 已有用户草稿 → 原样保留（含未保存修改）
+          d[k] = prev[k] !== undefined && draftSigsRef.current[k] === sigs[k] ? prev[k] : seedEntry(k, overrides, balances);
+        }
       }
-    }
-    setEdits(d);
+      draftSigsRef.current = sigs;
+      return d;
+    });
   }, [modelDir, overrides, balances]);
+
+  // 使用中模型轮询：3s 一次。锁定的模型在设置页不可编辑（单价/余额/模板全部）。
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/usage-meter/active');
+        if (!res.ok) return;
+        const doc = (await res.json()) as { active?: { provider: string; model: string } | null };
+        if (cancelled) return;
+        const a = doc.active ?? null;
+        const key = a !== null ? `${a.provider}/${a.model}` : '';
+        activeKeyRef.current = key;
+        setActiveKey(key);
+      } catch { /* ignore */ }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 3000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   // 由某模型当前编辑态构建 POST body：基础价 +（峰谷开启时）峰/谷价对 +
   // 生效星期 + 高峰时段（北京分钟）+ 单价币种；非 DeepSeek 附带用户余额。
@@ -910,10 +990,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     if (e.templateId === '') {
       // 自定义：customRows 是唯一权威成本模型，不发固定分桶字段。
     } else {
-      const tplDef = templates.find((tp) => tp.id === e.templateId);
-      // keep 模式（Batch 半价）只改折扣倍率，绝不触碰价格字段——否则托管字段
-      // 替换会把内置基价的缓存价结构剥掉。
-      const cols = tplDef?.mode === 'keep' ? [] : columnsForTemplate(e.templateId, templates);
+      // keep 模式（Batch 半价）本意是只改折扣倍率——但设置页对 keep 模板仍
+      // 渲染「基础单价」编辑格（columnsForTemplate 兜底列）。用户填了就必须
+      // 原样发送，否则既丢用户输入，宿主又会因覆盖缺价格字段而把内置基价
+      // 剥离成 0（表现为保存后输入框全部清空）。
+      const cols = columnsForTemplate(e.templateId, templates);
       if (cols.includes('input') && input !== undefined) prices.inputPerM = input;
       if (cols.includes('output') && output !== undefined) prices.outputPerM = output;
       if (cols.includes('cache') && cache !== undefined) prices.cacheReadPerM = cache;
@@ -975,6 +1056,31 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       const bal = num(e.balance);
       if (bal !== undefined) { body.balance = bal; body.balanceCurrency = e.currency === '' ? 'CNY' : e.currency; }
     }
+    // 模板 → 弹窗行（WYSIWYG，全模板统一）：行名与覆盖范围直接抄模板定义
+    // （如合并模板的一行「输入+输出（合并计价）」），单价取设置页对应格。
+    // 模板自身没有行定义时（Batch keep），按格子列生成。
+    if (e.templateId !== '') {
+      const pkF = { input: ['inputPeak', 'inputOff'], cache: ['cachePeak', 'cacheOff'], cacheWrite: ['cachePeak', 'cacheOff'], output: ['outPeak', 'outOff'] } as const;
+      const fieldOfBucket = { input: 'input', cacheRead: 'cache', cacheWrite: 'cacheWrite', output: 'output' } as const;
+      const tplDef2 = templates.find((tp) => tp.id === e.templateId);
+      const rowDefs = tplDef2 !== undefined && Array.isArray(tplDef2.rows) && tplDef2.rows.length > 0
+        ? tplDef2.rows.map((tr) => ({ label: tr.label, buckets: tr.buckets ?? [], f: fieldOfBucket[tr.buckets?.[0] ?? 'input'] }))
+        : columnsForTemplate(e.templateId, templates).map((f) => ({ label: FIELD_LABEL[f], buckets: [({ input: 'input', cache: 'cacheRead', cacheWrite: 'cacheWrite', output: 'output' } as const)[f]] as BillingRow['buckets'], f }));
+      const dispRows = rowDefs
+        .map((rd) => {
+          const row: BillingRow = { label: rd.label, buckets: rd.buckets };
+          if (!e.peakOn) {
+            row.perM = num(e[rd.f]);
+          } else {
+            row.perM = num(e[rd.f]);
+            row.peakPerM = num(e[pkF[rd.f][0]]);
+            row.offPerM = num(e[pkF[rd.f][1]]);
+          }
+          return row;
+        })
+        .filter((r) => r.perM !== undefined || r.peakPerM !== undefined || r.offPerM !== undefined);
+      if (dispRows.length > 0) body.rows = dispRows;
+    }
     return body;
   };
 
@@ -1025,6 +1131,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // (away and back to base) preserves the edit instead of reverting to the old
   // seeded value.
   const editNum = (key: string, fld: string, val: string): void => {
+    // 用户手动编辑余额 → 标记 dirty，R2 轮询跳过该字段，避免输入被刷回旧值。
+    if (fld === 'balance') balanceDirtyRef.current.add(key);
     setEdits((s) => {
       const cur = s[key];
       if (cur === undefined) return s;
@@ -1103,10 +1211,18 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       body: JSON.stringify(body),
     });
     if (res.ok) {
+      // 保存成功 = 用户输入已落盘 → 解除 dirty，此后轮询可安全刷新为服务端值。
+      balanceDirtyRef.current.delete(k);
       if (body.balance !== undefined) {
         setBalances((b) => ({ ...b, [`m:${provider}/${model}`]: { balance: Number(body.balance), currency: typeof body.balanceCurrency === 'string' ? body.balanceCurrency : 'CNY' } }));
       }
-      setOverrides((o) => ({ ...o, [k]: { prices: body.prices as Record<string, unknown> } }));
+      // 本地覆盖缓存要存全量（prices + rows + templateId）：只存 prices 会让
+      // 随后的草稿重播种丢掉模板选择与弹窗行快照。
+      setOverrides((o) => ({ ...o, [k]: {
+        prices: body.prices as Record<string, unknown>,
+        ...(Array.isArray(body.rows) ? { rows: body.rows as BillingRow[] } : {}),
+        ...(typeof body.templateId === 'string' ? { templateId: body.templateId } : {}),
+      } }));
       // 保存 = 应用：把当前显示值锚定为新的 base 快照（币种一并切换），此后
       // 的切换/还原都以此为准；弹窗经 displayCurrency 同步为同一币种。
       setEdits((s) => {
@@ -1122,16 +1238,22 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
 
   const saveModelPrice = async (provider: string, model: string) => {
     const k = draftKeyOf(provider, model);
+    if (k === activeKeyRef.current) {
+      // 使用中锁定：模型正在跑，禁止落盘任何价格/余额变更
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: tt('lockedSaveMsg') } }));
+      window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
+      return;
+    }
     const body = buildModelBody(provider, model);
     if (body === null) return;
-    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: '保存中…' } }));
+    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: tt('savingUnit') } }));
     let ok = false;
     try {
       ok = await persistModel(provider, model, body);
     } catch (err) {
       console.warn('[usage-meter] save model price failed', err);
     }
-    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : '保存失败' } }));
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? tt('savedUnit') : tt('saveFailedUnit') } }));
     window.setTimeout(() => setSaveStates((s) => {
       const n = { ...s };
       delete n[k];
@@ -1145,7 +1267,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     // 且从未改过 → 回退到官方价（seedEntry 里已含官方预填）。
     setEdits((s) => ({ ...s, [k]: seedEntry(k, overrides, balances) }));
     const official = isDeepseekRoute(provider);
-    setSaveStates((s) => ({ ...s, [k]: { ok: true, msg: official ? '已重置为官方价' : '已重置为该模型已保存的价格' } }));
+    setSaveStates((s) => ({ ...s, [k]: { ok: true, msg: official ? tt('resetToOfficial') : tt('resetToSaved') } }));
     window.setTimeout(() => setSaveStates((s) => {
       const n = { ...s };
       delete n[k];
@@ -1168,7 +1290,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       } catch (err) {
         console.warn('[usage-meter] save all: failed', err);
       }
-      setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? '已保存' : '保存失败' } }));
+      setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? tt('savedUnit') : tt('saveFailedUnit') } }));
     }));
     setSavingAll(false);
   };
@@ -1181,7 +1303,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const msToReadable = (ms: string): string => {
     const n = Number(ms);
     if (Number.isNaN(n) || n <= 0) return ms;
-    return n >= 86400000 ? `${Math.round(n / 86400000)} 天` : n >= 3600000 ? `${Math.round(n / 3600000)} 小时` : n >= 60000 ? `${Math.round(n / 60000)} 分钟` : `${Math.round(n / 1000)} 秒`;
+    return n >= 86400000 ? `${Math.round(n / 86400000)}{L('天')}` : n >= 3600000 ? `${Math.round(n / 3600000)}{L('小时')}` : n >= 60000 ? `${Math.round(n / 60000)}{L('分钟')}` : `${Math.round(n / 1000)}{L('秒')}`;
   };
   const readableToMs = (s: string): number => {
     const m = /^\s*(\d+)\s*(秒|分钟|小时|天)\s*$/.exec(s);
@@ -1194,19 +1316,17 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setSaving(true);
     try {
       const patch: Record<string, unknown> = {};
-      if (initialBalance.trim() !== '') { const n = Number(initialBalance); if (!Number.isNaN(n) && n >= 0) patch.initialBalance = n; }
       if (apiKey.trim() !== '' && apiKey !== '***') patch.deepseekApiKey = apiKey.trim();
       patch.provider = '*';
       const res = await fetch('/api/usage-meter/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
       if (res.ok) {
-        setSaveOk(true); setSaveMsg('已保存');
-        // API key 只在保存后“消失”（置为已保存芯片 / 清空输入，只作掩码显示）；
-        // 非 DeepSeek 初始余额则保留输入框，作为后续新增模型的默认起始余额。
+        setSaveOk(true); setSaveMsg(L('已保存'));
+        // API key 只在保存后"消失"（置为已保存芯片 / 清空输入，只作掩码显示）。
         if (apiKey.trim() !== '' && apiKey !== '***') { setKeySaved(true); setApiKey(''); }
-      } else { setSaveOk(false); setSaveMsg(`保存失败 (${res.status})`); }
+      } else { setSaveOk(false); setSaveMsg(L('保存失败 (') + `${res.status})`); }
     } catch (err) {
       console.warn('[usage-meter] save config failed', err);
-      setSaveOk(false); setSaveMsg('保存失败');
+      setSaveOk(false); setSaveMsg(L('保存失败'));
     }
     setSaving(false);
     window.setTimeout(() => { setSaveMsg(''); setSaveOk(false); }, 2500);
@@ -1214,46 +1334,55 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
 
   return (
     <div style={{ padding: '16px 24px 24px', fontSize: 13, color: t.text }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>dsh-usage-meter</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>dsh-usage-meter-harness</h2>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: t.text3 }}>Language</span>
+          <select value={lang} onChange={(ev) => { const v = ev.target.value as Lang; setLangState(v); setLang(v); bump(); }}
+            style={{ padding: '2px 6px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+            <option value="zh">{L('中文')}</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
       <p style={{ color: t.text3, fontSize: 12, margin: '0 0 12px' }}>
-        DeepSeek 用量计量 · 全局设置。单价与峰谷计费请在「会话 · 用量卡片 → 用户自定义设置」中编辑。
+        {tt('subtitle')}
       </p>
       {loadError !== '' && (
         <div style={{ marginBottom: 12, padding: '8px 10px', border: `1px solid ${t.error}`, borderRadius: 6, color: t.error, fontSize: 12 }}>{loadError}</div>
       )}
       {loading ? (
-        <div style={{ color: t.text3, fontSize: 13 }}>加载全局配置…</div>
+        <div style={{ color: t.text3, fontSize: 13 }}>{L('加载全局配置…')}</div>
       ) : (
         <div>
           <div style={field}>
-            <label style={label} htmlFor="um-init">非 DeepSeek 初始余额</label>
-            <input id="um-init" value={initialBalance} onChange={(e) => setInitialBalance(e.target.value)} placeholder="如 100（CNY）" style={input} />
-          </div>
-          <div style={field}>
-            <label style={label} htmlFor="um-key">DeepSeek API Key</label>
+            <label style={label} htmlFor="um-key">{tt('apiKey')}</label>
             <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 320, alignItems: 'center' }}>
               {keySaved ? (
-                <span style={{ padding: '4px 8px', borderRadius: 6, background: 'rgba(22, 163, 74, 0.10)', color: t.ok, fontSize: 12, whiteSpace: 'nowrap' }}>已保存</span>
+                <span style={{ padding: '4px 8px', borderRadius: 6, background: 'rgba(22, 163, 74, 0.10)', color: t.ok, fontSize: 12, whiteSpace: 'nowrap' }}>{tt('keySavedChip')}</span>
               ) : (
-                <span style={{ color: t.text3, fontSize: 12, whiteSpace: 'nowrap' }}>未配置</span>
+                <span style={{ color: t.text3, fontSize: 12, whiteSpace: 'nowrap' }}>{tt('keyNotSet')}</span>
               )}
               <input
                 id="um-key"
                 value={apiKey}
                 onChange={(e) => { setApiKey(e.target.value); }}
-                placeholder={keySaved ? '留空保留当前 Key；填写以覆盖' : '如 sk-…'}
+                placeholder={keySaved ? tt('keyPlaceholderSaved') : tt('keyPlaceholderNew')}
                 autoComplete="off"
                 style={{ ...input, maxWidth: 200 }}
               />
             </div>
+            <div style={{ fontSize: 11, color: t.ok, lineHeight: 1.5 }}>
+              {tt('apiKeyTip')}
+            </div>
           </div>
           <div style={field}>
-            <label style={label} htmlFor="um-rate">当前汇率（1 USD ≈）</label>
+            <label style={label} htmlFor="um-rate">{tt('rate')}</label>
             <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 360, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: t.text }}>{pageRate.usdToCny > 0 ? pageRate.usdToCny.toFixed(4) : '未获取'} CNY</span>
+              <span style={{ fontSize: 13, color: t.text }}>{pageRate.usdToCny > 0 ? pageRate.usdToCny.toFixed(4) : tt('notFetched')} CNY</span>
               {pageRate.updatedAt > 0 && (
                 <span style={{ fontSize: 11, color: Date.now() - pageRate.updatedAt > 24 * 3600 * 1000 ? t.error : t.text3, whiteSpace: 'nowrap' }}>
-                  获取于 {fmtTime(pageRate.updatedAt)}{Date.now() - pageRate.updatedAt > 24 * 3600 * 1000 ? ' · 已超24h，将自动刷新' : ''}
+                  {tt('fetchedAt')} {fmtTime(pageRate.updatedAt)}{Date.now() - pageRate.updatedAt > 24 * 3600 * 1000 ? tt('staleOver24h') : ''}
                 </span>
               )}
               <button type="button" onClick={() => void (async () => {
@@ -1261,15 +1390,15 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                   const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
                   if (r.ok) { const d = await r.json() as { usdToCny?: number; rateUpdatedAt?: number }; setPageRate({ usdToCny: typeof d.usdToCny === 'number' ? d.usdToCny : pageRate.usdToCny, updatedAt: typeof d.rateUpdatedAt === 'number' ? d.rateUpdatedAt : Date.now() }); }
                 } catch { /* ignore */ }
-              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>刷新汇率</button>
+              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: `1px solid ${t.border}`, background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
-              {saving ? '保存中…' : '保存'}
+              {saving ? tt('savingUnit') : tt('save')}
             </button>            {saveMsg !== '' && (
               <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
-                {saveMsg}{saveOk && apiKey.trim() !== '' ? ' · 已更新 API Key' : ''}
+                {saveMsg}{saveOk && apiKey.trim() !== '' ? L(' · 已更新 API Key') : ''}
               </span>
             )}
           </div>
@@ -1278,9 +1407,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${t.borderSoft}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>用量计量 · 模型配置</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{L('用量计量 · 模型配置')}</div>
                 <div style={{ color: t.text3, fontSize: 11, marginBottom: 0 }}>
-                  按供应商 → 模型为每个模型单独设置币种、用户余额、单价（含峰谷价对）、生效星期与高峰时段。
+                  {L('按供应商 → 模型为每个模型单独设置币种、用户余额、单价（含峰谷价对）、生效星期与高峰时段。')}
                 </div>
               </div>
               {(() => {
@@ -1293,21 +1422,21 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                     disabled={savingAll}
                     style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: `1px solid ${t.border}`, background: savingAll ? 'rgba(139,148,158,0.10)' : t.accent, color: savingAll ? t.text3 : t.text, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
-                    {savingAll ? '保存中…' : '一键保存全部'}
+                    {savingAll ? 'saving' : L('一键保存全部')}
                   </button>
                 );
               })()}
             </div>
             {modelsLoading ? (
-              <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>加载模型目录…</div>
+              <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>{L('加载模型目录…')}</div>
             ) : modelDir.length === 0 ? (
               <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>
-                未从模型目录获取到模型。请确认当前组合已注册 LLM 适配（`ctx.llm`）。
+                {L('未从模型目录获取到模型。请确认当前组合已注册 LLM 适配（ctx.llm）。')}
               </div>
             ) : (
               <div style={{ marginTop: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <label style={{ fontSize: 12, color: t.text2 }} htmlFor="um-provider">供应商</label>
+                  <label style={{ fontSize: 12, color: t.text2 }} htmlFor="um-provider">{L('供应商')}</label>
                   <select
                     id="um-provider"
                     value={selProvider}
@@ -1323,14 +1452,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                       <input type="checkbox" checked={sharedBalances[selProvider] === true}
                         onChange={(ev) => void toggleSharedBalance(selProvider, ev.target.checked)}
                         style={{ accentColor: t.accent }} />
-                      <span style={{ fontSize: 11, color: t.text2 }}>共享余额（该供应商所有模型共用一个余额）</span>
+                      <span style={{ fontSize: 11, color: t.text2 }}>{L('共享余额（该供应商所有模型共用一个余额）')}</span>
                     </label>
                   )}
                 </div>
                 {(() => {
                   const active = modelDir.find((p) => p.provider === selProvider);
-                  if (active === undefined) return <div style={{ color: t.text3, fontSize: 12 }}>请选择供应商</div>;
-                  if (active.models.length === 0) return <div style={{ color: t.text3, fontSize: 12 }}>该供应商下暂无模型</div>;
+                  if (active === undefined) return <div style={{ color: t.text3, fontSize: 12 }}>{L('请选择供应商')}</div>;
+                  if (active.models.length === 0) return <div style={{ color: t.text3, fontSize: 12 }}>{L('该供应商下暂无模型')}</div>;
                   const deep = isDeepseekRoute(active.provider);
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1340,6 +1469,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         if (e === undefined) return null;
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
+                        const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
                         const cell: CSSProperties = { width: '100%', minWidth: 80, maxWidth: 150, boxSizing: 'border-box', textAlign: 'right' as const, fontSize: 12, padding: '5px 8px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text };
                         return (
                           <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
@@ -1351,75 +1481,88 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             >
                               <span style={{ fontSize: 10, color: t.text3 }}>{isOpen ? '▼' : '▶'}</span>
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
-                              {e.peakOn && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,148,158,0.12)', color: t.text2, whiteSpace: 'nowrap' }}>峰谷</span>}
+                              {e.peakOn && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,148,158,0.12)', color: t.text2, whiteSpace: 'nowrap' }}>{tt('peakBadge')}</span>}
+                              {locked && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(220,38,38,0.12)', color: t.error, whiteSpace: 'nowrap' }}>{tt('lockedBadge')}</span>}
                               <span style={{ fontSize: 10, color: t.text3 }}>{e.currency}</span>
                             </button>
                             {/* 展开体 */}
                             {isOpen && (
-                              <div style={{ padding: '4px 12px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              <>
+                              <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
+                              <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 8, opacity: locked ? 0.75 : undefined }}>
+                                {locked && (
+                                  <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('lockedHint')}</div>
+                                )}
                                 {e.prefillOfficial && (
-                                  <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>已按 DeepSeek 官方价预填：周一至五 9:00–12:00、14:00–18:00 为峰价，周六/周日按谷价；可修改后保存。</div>
+                                  <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>{tt('prefillOfficial')}</div>
                                 )}
                                 {e.noSavedPrice && (
-                                  <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>该模型尚未配置价格与余额：请在下方填写单价/余额后点「保存单价」，否则该模型用量金额可能按 0 计。</div>
+                                  <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('noSavedPrice')}</div>
                                 )}
-                                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
-                                  <label style={field} htmlFor={`um-cur-${k}`}>
-                                    <span style={{ fontSize: 12, color: t.text2 }}>币种</span>
-                                    <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
-                                      style={{ ...select, maxWidth: 100, fontSize: 12, padding: '3px 6px' }}>
-                                      <option value="CNY">CNY (¥)</option>
-                                      <option value="USD">USD ($)</option>
-                                    </select>
-                                  </label>
-                                  {!deep && (
-                                    <label style={field} htmlFor={`um-bal-${k}`}>
-                                      <span style={{ fontSize: 12, color: t.text2 }}>用户余额</span>
-                                      <input id={`um-bal-${k}`} value={e.balance}
-                                        onChange={(ev) => editNum(k, 'balance', ev.target.value)}
-                                        placeholder="如 100"
-                                        style={{ ...input, maxWidth: 140, fontSize: 12, padding: '3px 6px' }} />
-                                    </label>
+                                  {e.usesSharedBalance === true && (
+                                    <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>{tt('sharedBalNote')}</div>
                                   )}
-                                </div>
-                                {templates.length > 0 && (
-                                  <label style={field} htmlFor={`um-tpl-${k}`}>
-                                    <span style={{ fontSize: 12, color: t.text2 }}>计费模板</span>
-                                    <select id={`um-tpl-${k}`} value={e.templateId}
-                                      onChange={(ev) => {
-                                        const tpl = templates.find((tp) => tp.id === ev.target.value);
-                                        const v = ev.target.value;
-                                        setEdits((s) => ({ ...s, [k]: { ...e,
-                                          templateId: v,
-                                          combined: tpl?.mode === 'combined',
-                                          discount: tpl?.mode === 'keep' ? '0.5' : '',
-                                          peakOn: tpl?.peak === true,
-                                          // 自定义：给一组默认单价项（输入/输出），用户可增删。
-                                          // 选命名模板：清空 customRows（宿主以模板/固定格计价）。
-                                          customRows: v === ''
-                                            ? (e.customRows.length > 0 ? e.customRows : [{ bucket: 'input', perM: '', peakPerM: '', offPerM: '' }, { bucket: 'output', perM: '', peakPerM: '', offPerM: '' }])
-                                            : [],
-                                        } }));
-                                      }}
-                                      style={{ ...select, maxWidth: 240, fontSize: 12, padding: '3px 6px' }}>
-                                      <option value="">（自定义）</option>
-                                      {templates.map((tp) => <option key={tp.id} value={tp.id}>{tp.label}</option>)}
-                                    </select>
-                                  </label>
-                                )}
-                                {e.combined && <div style={{ fontSize: 11, color: t.text2 }}>合并计价：输入单价即对全部 token 统一计费（缓存/输出合并）。</div>}
-                                {e.discount !== '' && (
-                                  <label style={field} htmlFor={`um-disc-${k}`}>
-                                    <span style={{ fontSize: 12, color: t.text2 }}>Batch 折扣</span>
-                                    <input id={`um-disc-${k}`} value={e.discount}
-                                      onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, discount: ev.target.value } }))}
-                                      placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
-                                  </label>
-                                )}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 10, rowGap: 6, alignItems: 'center' }}>
+                                                                  <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('currency')}</span>
+                                                                  <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
+                                                                    style={{ ...select, maxWidth: 110, fontSize: 12, padding: '2px 6px' }}>
+                                                                    <option value="CNY">CNY (¥)</option>
+                                                                    <option value="USD">USD ($)</option>
+                                                                  </select>
+                                                                  {!deep && (
+                                                                    <>
+                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('balance')}</span>
+                                                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                        <input id={`um-bal-${k}`} value={e.balance}
+                                                                          onChange={(ev) => editNum(k, 'balance', ev.target.value)}
+                                                                          placeholder="如 100"
+                                                                          style={{ ...input, maxWidth: 140, fontSize: 12, padding: '2px 6px' }} />
+                                                                        <span style={{ fontSize: 10, color: t.ok }}>{tt('balanceTip')}</span>
+                                                                      </div>
+                                                                    </>
+                                                                  )}
+                                                                  {templates.length > 0 && (
+                                                                    <>
+                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('billingTemplate')}</span>
+                                                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                        <select id={`um-tpl-${k}`} value={e.templateId}
+                                                                          onChange={(ev) => {
+                                                                            const tpl = templates.find((tp) => tp.id === ev.target.value);
+                                                                            const v = ev.target.value;
+                                                                            setEdits((s) => ({ ...s, [k]: { ...e,
+                                                                              templateId: v,
+                                                                              combined: tpl?.mode === 'combined',
+                                                                              discount: tpl?.mode === 'keep' ? '0.5' : '',
+                                                                              peakOn: tpl?.peak === true,
+                                                                              // 自定义：给一组默认单价项（输入/输出），用户可增删。
+                                                                              // 选命名模板：清空 customRows（宿主以模板/固定格计价）。
+                                                                              customRows: v === ''
+                                                                                ? (e.customRows.length > 0 ? e.customRows : [{ bucket: 'input', perM: '', peakPerM: '', offPerM: '' }, { bucket: 'output', perM: '', peakPerM: '', offPerM: '' }])
+                                                                                : [],
+                                                                            } }));
+                                                                          }}
+                                                                          style={{ ...select, maxWidth: 240, fontSize: 12, padding: '2px 6px' }}>
+                                                                          <option value="">{L('（自定义）')}</option>
+                                                                          {templates.map((tp) => <option key={tp.id} value={tp.id}>{L(tp.label)}</option>)}
+                                                                        </select>
+                                                                        <span style={{ fontSize: 10, color: t.ok }}>{tt('templateTip')}</span>
+                                                                      </div>
+                                                                    </>
+                                                                  )}
+                                                                  {e.combined && <div style={{ fontSize: 11, color: t.text2, gridColumn: '1 / -1' }}>{tt('discountNote')}</div>}
+                                                                  {e.discount !== '' && (
+                                                                    <>
+                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('batchDiscount')}</span>
+                                                                      <input id={`um-disc-${k}`} value={e.discount}
+                                                                        onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, discount: ev.target.value } }))}
+                                                                        placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '2px 6px', justifySelf: 'start' }} />
+                                                                    </>
+                                                                  )}
+                                                                </div>
                                 {/* R5 自定义单价项：templateId==='' 时用可增删的行；命名模板用下方固定格+峰谷。 */}
                                 {e.templateId === '' && (
                                   <div>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>自定义单价项（每行 = 单价 × 该行 token 数；峰/谷价在下方「启用峰谷计费」里统一填）</div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>{L('自定义单价项（每行 = 单价 × 该行 token 数；峰谷价在下方「启用峰谷计费」里统一填）')}</div>
                                     {e.customRows.map((r, ri) => {
                                       const usedElsewhere = new Set<CustomBucket>(e.customRows.map((x) => x.bucket));
                                       usedElsewhere.delete(r.bucket);
@@ -1433,49 +1576,46 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                   disabled={disabled}
                                                   onChange={() => editCustomRow(k, ri, (x) => ({ ...x, bucket: b }))}
                                                   style={{ accentColor: t.accent }} />
-                                                {CUSTOM_BUCKET_LABEL[b]}
+                                                {L(CUSTOM_BUCKET_LABEL[b])}
                                               </label>
                                             );
                                           })}
-                                          <span style={{ fontSize: 11, color: t.text2, minWidth: 56 }}>＝ {CUSTOM_BUCKET_LABEL[r.bucket]}</span>
+                                          <span style={{ fontSize: 11, color: t.text2, minWidth: 56 }}>＝ {L(CUSTOM_BUCKET_LABEL[r.bucket])}</span>
                                           {e.peakOn ? (
-                                            <span style={{ fontSize: 11, color: t.text3, minWidth: 80, textAlign: 'right' as const }}>峰谷接管 →</span>
+                                            <span style={{ fontSize: 11, color: t.text3, minWidth: 80, textAlign: 'right' as const }}>{L('峰谷接管 →')}</span>
                                           ) : (
-                                            <input value={r.perM} placeholder="元/M"
+                                            <input value={r.perM} placeholder={tt('yuanPerM')}
                                               onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, perM: ev.target.value }))}
                                               style={{ ...input, maxWidth: 80, fontSize: 12, padding: '3px 6px' }} />
                                           )}
                                           <button type="button"
                                             onClick={() => delCustomRow(k, ri)}
-                                            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>删</button>
+                                            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>{tt('del')}</button>
                                         </div>
                                       );
                                     })}
                                     {e.customRows.length < CUSTOM_BUCKETS.length && (
                                       <button type="button"
                                         onClick={() => addCustomRow(k)}
-                                        style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>+ 添加单价项（最多 4 项）</button>
+                                        style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('customAddRow')}</button>
                                     )}
                                   </div>
                                 )}
-                                {e.templateId !== '' && (
+                                {/* 峰谷定价可见时（官方 DeepSeek / 峰谷模板 / 手动开启），
+                                    基础单价格整体不渲染——两套价格只能出现一套 */}
+                                {e.templateId !== '' && !(deep || e.templateId === 'peak-off-peak' || e.peakOn) && (
                                 <div>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>基础单价（元/M 或 $/M）</div>
-                                  {(() => {
-                                    const gridFields = columnsForTemplate(e.templateId, templates);
-                                    return (
-                                      <div style={{ display: 'grid', gridTemplateColumns: `auto ${gridFields.map(() => '1fr').join(' ')}`, gap: '2px 8px', alignItems: 'center' }}>
-                                        <span style={{ fontSize: 10, color: t.text3 }} />
-                                        {gridFields.map((f) => <span key={f} style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>{FIELD_LABEL[f]}</span>)}
-                                        <span style={{ fontSize: 11, color: t.text2 }}>单价</span>
-                                        {gridFields.map((f) => (
-                                          <input key={f} id={`um-${f}-${k}`} value={e[f]}
-                                            onChange={(ev) => editNum(k, f, ev.target.value)}
-                                            placeholder="元/M" style={cell} />
-                                        ))}
-                                      </div>
-                                    );
-                                  })()}
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>{tt('basePrice')}</div>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    {columnsForTemplate(e.templateId, templates).map((f) => (
+                                      <label key={f} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0 }}>
+                                        <span style={{ fontSize: 10, color: t.text3 }}>{FIELD_LABEL[f]}</span>
+                                        <input id={`um-${f}-${k}`} value={e[f]}
+                                          onChange={(ev) => editNum(k, f, ev.target.value)}
+                                          placeholder={tt('yuanPerM')} style={cell} />
+                                      </label>
+                                    ))}
+                                  </div>
                                 </div>
                                 )}
                                 <div>
@@ -1502,9 +1642,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                               });
                                             }}
                                             style={{ accentColor: t.accent }} />
-                                          <span style={{ fontSize: 12, color: t.text2 }}>启用峰谷计费</span>
+                                          <span style={{ fontSize: 12, color: t.text2 }}>{tt('peakToggle')}</span>
                                         </label>
-                                        <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; 未勾选星期 = 谷价</span>
+                                        <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; {tt('uncheckIsOff')}</span>
                                       </>
                                     )}
                                   </div>
@@ -1515,41 +1655,36 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                           {e.customRows.map((r, ri) => (
                                             <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                               <span style={{ fontSize: 11, color: t.text2, width: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{CUSTOM_BUCKET_LABEL[r.bucket]}</span>
-                                              <span style={{ fontSize: 10, color: t.text3 }}>峰价</span>
-                                              <input value={r.peakPerM} placeholder="元/M"
+                                              <span style={{ fontSize: 10, color: t.text3 }}>{tt('peakPrice')}</span>
+                                              <input value={r.peakPerM} placeholder={tt('yuanPerM')}
                                                 onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, peakPerM: ev.target.value }))}
                                                 style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
-                                              <span style={{ fontSize: 10, color: t.text3 }}>谷价</span>
-                                              <input value={r.offPerM} placeholder="元/M"
+                                              <span style={{ fontSize: 10, color: t.text3 }}>{tt('offPrice')}</span>
+                                              <input value={r.offPerM} placeholder={tt('yuanPerM')}
                                                 onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, offPerM: ev.target.value }))}
                                                 style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
                                             </div>
                                           ))}
                                         </div>
                                       ) : (
-                                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
-                                        <span style={{ fontSize: 10, color: t.text3 }} />
-                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输入(未命中)</span>
-                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>缓存命中</span>
-                                        <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输出</span>
-                                        <span style={{ fontSize: 11, color: t.text2 }}>峰价</span>
-                                        {(['inputPeak', 'cachePeak', 'outPeak'] as const).map((fld) => {
-                                          const key = `um-${fld}-${k}`;
-                                          return <input key={key} id={key} value={e[fld]}
-                                            onChange={(ev) => editNum(k, fld, ev.target.value)}
-                                            placeholder="元/M" style={cell} />;
-                                        })}
-                                        <span style={{ fontSize: 11, color: t.text2 }}>谷价</span>
-                                        {(['inputOff', 'cacheOff', 'outOff'] as const).map((fld) => {
-                                          const key = `um-${fld}-${k}`;
-                                          return <input key={key} id={key} value={e[fld]}
-                                            onChange={(ev) => editNum(k, fld, ev.target.value)}
-                                            placeholder="元/M" style={cell} />;
-                                        })}
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        {([[L('输入(未命中)'), 'inputPeak', 'inputOff'], [L('缓存命中'), 'cachePeak', 'cacheOff'], [L('输出'), 'outPeak', 'outOff']] as const).map(([lab, pk, off]) => (
+                                          <div key={pk} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0 }}>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>{lab}</span>
+                                            {([[pk, '峰价'], [off, '谷价']] as const).map(([fld, tag]) => (
+                                              <label key={fld} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <span style={{ fontSize: 10, color: t.text3, whiteSpace: 'nowrap' as const }}>{tt(tag === '峰价' ? 'peakPrice' : 'offPrice')}</span>
+                                                <input id={`um-${fld}-${k}`} value={e[fld]}
+                                                  onChange={(ev) => editNum(k, fld, ev.target.value)}
+                                                  placeholder={tt('yuanPerM')} style={{ ...cell, flex: 1, minWidth: 0 }} />
+                                              </label>
+                                            ))}
+                                          </div>
+                                        ))}
                                       </div>
                                       )}
                                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
-                                        <span style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }}>峰谷星期:</span>
+                                        <span style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }}>{tt('peakDaysLabel')}</span>
                                         {DAY_LABELS.map(([d, lbl]) => (
                                           <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer' as const }}>
                                             <input type="checkbox" checked={e.days.includes(d)}
@@ -1564,11 +1699,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                         ))}
                                       </div>
                                       <div>
-                                        <div style={{ fontSize: 11, color: t.text2, marginBottom: 3 }}>高峰时段（北京时间）:</div>
+                                        <div style={{ fontSize: 11, color: t.text2, marginBottom: 3 }}>{tt('peakHoursLabel')}</div>
                                         {e.windows.map((p, pi) => (
                                           <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, flexWrap: 'wrap' as const }}>
                                             <span style={{ fontSize: 11, color: t.text3 }}>{pi + 1}.</span>
-                                            <span style={{ fontSize: 10, color: t.text3 }}>起</span>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('start')}</span>
                                             {([['sh', 23], ['sm', 59]] as const).map(([f, max]) => (
                                               <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
                                                 onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
@@ -1578,8 +1713,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                 ))}
                                               </select>
                                             ))}
-                                            <span style={{ fontSize: 10, color: t.text3 }}>时</span>
-                                            <span style={{ fontSize: 10, color: t.text3 }}>止</span>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('hourUnit')}</span>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('end')}</span>
                                             {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
                                               <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
                                                 onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
@@ -1592,28 +1727,31 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                             <button type="button"
                                               onClick={() => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.filter((_, xi) => xi !== pi) } }))}
                                               disabled={e.windows.length <= 1}
-                                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>删</button>
+                                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>{tt('del')}</button>
                                           </div>
                                         ))}
                                         <button type="button"
                                           onClick={() => setEdits((s) => ({ ...s, [k]: { ...e, windows: [...e.windows, { sh: '9', sm: '00', eh: '12', em: '00' }] } }))}
-                                          style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>+ 添加时段</button>
+                                          style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('addPeriod')}</button>
                                       </div>
                                     </div>
                                   )}
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
-                                    style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
-                                    保存单价
-                                  </button>
-                                  <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
-                                    style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
-                                    重置价格
-                                  </button>
-                                  {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
+                                {/* 操作按钮在锁定区外：点保存时给出红色提示而非无响应 */}
                                 </div>
+                              </fieldset>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
+                                  style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+                                  {tt('saveUnit')}
+                                </button>
+                                <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
+                                  style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
+                                  {tt('resetPrice')}
+                                </button>
+                                {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
                               </div>
+                            </>
                             )}
                           </div>
                         );
@@ -1626,7 +1764,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           </div>
 
           <p style={{ color: t.text3, fontSize: 11, marginTop: 12, marginBottom: 0 }}>
-            会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。
+            {L('会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。')}
           </p>
         </div>
       )}
@@ -1708,11 +1846,11 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
       });
       setSaved(res.ok);
       if (res.ok) setBalanceDirty(false);
-      setSaveMsg(res.ok ? '已保存，余额已更新' : '保存失败');
+      setSaveMsg(res.ok ? L('已保存，余额已更新') : L('保存失败'));
       window.setTimeout(() => { setSaved(false); setSaveMsg(''); }, 2500);
     } catch (err) {
       console.warn('[usage-meter] save failed', err);
-      setSaveMsg('保存失败');
+      setSaveMsg(L('保存失败'));
     }
   };
 
@@ -1724,22 +1862,22 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
         aria-expanded={openSettings}
         style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: t.text2, background: 'transparent', border: 'none', padding: '2px 0', cursor: 'pointer' }}
       >
-        <span>用户自定义设置</span>
+        <span>{L('用户自定义设置')}</span>
         <span style={{ fontSize: 9, transform: openSettings ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease' }}>▼</span>
       </button>
 
       {openSettings && (
         <div>
-          <div style={{ color: t.text3, fontSize: 10, marginBottom: 4 }}>保存后余额立即生效；模板修改需刷新浏览器生效</div>
+          <div style={{ color: t.text3, fontSize: 10, marginBottom: 4 }}>{L('保存后余额立即生效；模板修改需刷新浏览器生效')}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <label style={{ fontSize: 11, color: t.text2 }}>币种</label>
+            <label style={{ fontSize: 11, color: t.text2 }}>{L('币种')}</label>
             <select value={cfgCurrency} onChange={(e) => onCurrencyChange(e.target.value)} style={{ fontSize: 12, padding: '2px 4px' }}>
-              <option value="CNY">CNY（人民币）</option>
-              <option value="USD">USD（美元）</option>
+              <option value="CNY">{L('CNY（人民币）')}</option>
+              <option value="USD">{L('USD（美元）')}</option>
             </select>
             {isDeepSeek && (
               <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
-                {saved ? '已保存' : '保存'}
+                {saved ? L('已保存') : tt('save')}
               </button>
             )}
             {isDeepSeek && saveMsg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{saveMsg}</span>}
@@ -1747,12 +1885,12 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
 
           {!isDeepSeek && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-              <label style={{ fontSize: 11, color: t.text2 }}>账户余额（{unitSym}）</label>
+              <label style={{ fontSize: 11, color: t.text2 }}>{L('账户余额（')}{unitSym}）</label>
               <input value={cfgBalance} onChange={(e) => { setCfgBalance(e.target.value); setBalanceDirty(true); }} placeholder={`如 100${unitSym}`} style={{ width: 84, fontSize: 12, padding: '2px 4px' }} />
-              <label style={{ fontSize: 11, color: t.text2 }}>充值（{unitSym}，可负）</label>
+              <label style={{ fontSize: 11, color: t.text2 }}>{L('充值（')}{unitSym}{L('，可负）')}</label>
               <input value={cfgRecharge} onChange={(e) => setCfgRecharge(e.target.value)} placeholder={`如 20${unitSym}`} style={{ width: 84, fontSize: 12, padding: '2px 4px' }} />
               <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
-                {saved ? '已保存' : '保存'}
+                {saved ? L('已保存') : tt('save')}
               </button>
               {saveMsg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{saveMsg}</span>}
             </div>
@@ -1766,8 +1904,8 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
           {usage.rateUpdatedAt > 0 && (
             <div style={{ color: t.text3, fontSize: 10, marginTop: 2 }}>
               {conversionActive
-                ? `汇率：1 USD ≈ ${rateInfo.usdToCny.toFixed(4)} CNY · 更新于 ${fmtTime(rateInfo.rateUpdatedAt)}（${modelCurrency} → ${cfgCurrency} 需换算）`
-                : `汇率：1 USD ≈ ${rateInfo.usdToCny.toFixed(4)} CNY · 更新于 ${fmtTime(rateInfo.rateUpdatedAt)}`}
+                ? `{L('汇率：1 USD ≈ ')}${rateInfo.usdToCny.toFixed(4)} CNY · ${L('更新于')} ${fmtTime(rateInfo.rateUpdatedAt)}（${modelCurrency} → ${cfgCurrency} 需换算）`
+                : `{L('汇率：1 USD ≈ ')}${rateInfo.usdToCny.toFixed(4)} CNY · ${L('更新于')} ${fmtTime(rateInfo.rateUpdatedAt)}`}
             </div>
           )}
         </div>
@@ -1854,7 +1992,7 @@ function PriceEditor({
     setTypeNote(tpl.note ?? '');
     if (tpl.mode === 'keep') {
       setBilling((b) => ({ combined: b.combined, discount: 0.5, peak: b.peak }));
-      setMsg('已启用 Batch 半价（×0.5），可修改后保存');
+      setMsg(L('已启用 Batch 半价（×0.5），可修改后保存'));
       window.setTimeout(() => setMsg(''), 3000);
       return;
     }
@@ -1866,7 +2004,7 @@ function PriceEditor({
     setLabels(tpl.rows.map((r) => r.label));
     setPrices(tpl.rows.map((r) => prefill(r.buckets[0] ?? 'input')));
     setBilling({ combined: tpl.mode === 'combined', discount: undefined, peak: tpl.peak === true });
-    setMsg(`已载入「${tpl.label}」计费方式，可修改后保存`);
+    setMsg(`${L('已载入「')}${tpl.label}${L('计费方式，可修改后保存')}`);
     window.setTimeout(() => setMsg(''), 3000);
   };
 
@@ -1938,7 +2076,7 @@ function PriceEditor({
       prices: pricePatch,
       rows: rowsState.map((r, i) => ({ label: (labels[i] ?? '').trim() || r.label, buckets: r.buckets })),
     });
-    flash(ok ? '已保存，请刷新浏览器后生效' : '保存失败');
+    flash(ok ? L('已保存，请刷新浏览器后生效') : L('保存失败'));
   };
 
   const reset = async () => {
@@ -1961,7 +2099,7 @@ function PriceEditor({
         onResetCurrency?.(op.pricing.currency ?? usage.currency);
         setJustReset(true);
         window.setTimeout(() => setJustReset(false), 1600);
-        flash(ok ? '已重置为该模型官方价格，请刷新浏览器后生效' : '重置失败');
+        flash(ok ? L('已重置为该模型官方价格，请刷新浏览器后生效') : L('重置失败'));
       }
       return;
     }
@@ -1971,37 +2109,37 @@ function PriceEditor({
     onResetCurrency?.(base?.currency ?? usage.currency);
     setJustReset(true);
     window.setTimeout(() => setJustReset(false), 1600);
-    flash('已重置为该计费方式结构，请核对单价后点保存单价生效');
+    flash(L('已重置为该计费方式结构，请核对单价后点保存单价生效'));
   };
 
   return (
     <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${t.borderSoft}` }}>
-      <div style={{ color: t.text2, fontSize: 11, marginBottom: 2 }}>模型单价编辑（{model} · 单位：每百万tokens {sym}）</div>
+      <div style={{ color: t.text2, fontSize: 11, marginBottom: 2 }}>{L('模型单价编辑（')}{model} · {L('单位：每百万tokens')} {sym}）</div>
 
       {!isDeepSeek && (
         <div style={{ marginBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 11, color: t.text2 }}>计费方式</label>
+            <label style={{ fontSize: 11, color: t.text2 }}>{tt('billingTemplate')}</label>
             <select value={typeKey} onChange={(e) => applyTemplate(e.target.value)} style={{ fontSize: 12, padding: '2px 4px', maxWidth: 320 }}>
-              <option value="">（选择计费方式预填）</option>
+              <option value="">{L('选择计费方式预填）')}</option>
               {types.map((tpl, i) => <option key={tpl.id} value={String(i)}>{tpl.label}</option>)}
             </select>
-            <label style={{ fontSize: 11, color: t.text2 }}>币种</label>
+            <label style={{ fontSize: 11, color: t.text2 }}>{L('币种')}</label>
             <select value={currency} onChange={(e) => void onCurrencySelect(e.target.value)} style={{ fontSize: 12, padding: '2px 4px' }}>
-              <option value="CNY">CNY（人民币）</option>
-              <option value="USD">USD（美元）</option>
+              <option value="CNY">{L('CNY（人民币）')}</option>
+              <option value="USD">{L('USD（美元）')}</option>
             </select>
           </div>
-          {typeNote !== '' && <div style={{ color: t.text3, fontSize: 10, marginTop: 2 }}>{typeNote}</div>}
+          {typeNote !== '' && <div style={{ color: t.text3, fontSize: 10, marginTop: 2 }}>{L(typeNote)}</div>}
         </div>
       )}
 
       <div style={{ ...row, paddingBottom: 2, color: t.text3, fontSize: 10 }}>
-        <span style={{ flex: 1 }}>用量名称（可改）</span>
-        <span style={{ width: 86, textAlign: 'right' }}>{billing.peak ? '高峰价（可改）' : '单价（可改）'}</span>
-        {billing.peak && <span style={{ width: 86, textAlign: 'right' }}>谷价（可改）</span>}
+        <span style={{ flex: 1 }}>{L('用量名称（可改）')}</span>
+        <span style={{ width: 86, textAlign: 'right' }}>{billing.peak ? L('高峰价（可改）') : L('单价（可改）')}</span>
+        {billing.peak && <span style={{ width: 86, textAlign: 'right' }}>{L('谷价（可改）')}</span>}
       </div>
-      {billing.peak && <div style={{ color: t.text3, fontSize: 10, marginBottom: 2 }}>谷价留空 = 高峰×0.5；高峰时段默认周一到周五 9-12 / 14-18（北京时间），可在下方修改；周六周日全天按谷价</div>}
+      {billing.peak && <div style={{ color: t.text3, fontSize: 10, marginBottom: 2 }}>{L('谷价留空 = 高峰×0.5；高峰时段默认周一到五 9-12 / 14-18（北京时间），可在下方修改')}；周六周日全天按谷价</div>}
 
       {rowsState.map((r, i) => (
         <div key={r.buckets.join(',')} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -2020,7 +2158,7 @@ function PriceEditor({
             <input
               value={offPeakPrices[i] ?? ''}
               onChange={(e) => setOffPeakPrices((os) => { const n = [...os]; n[i] = e.target.value; return n; })}
-              placeholder="谷价"
+              placeholder={tt('offPrice')}
               style={{ width: 86, fontSize: 12, padding: '1px 4px', textAlign: 'right', background: 'rgba(37, 99, 235, 0.06)' }}
             />
           )}
@@ -2029,7 +2167,7 @@ function PriceEditor({
 
       {billing.peak && (
         <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${t.borderSoft}`, fontSize: 11, color: t.text2 }}>
-          <div style={{ marginBottom: 2 }}>分峰谷的星期（不勾 = 全天按谷价；周六周日默认不勾）</div>
+          <div style={{ marginBottom: 2 }}>{L('分峰谷的星期（不勾 = 全天按谷价；周六周日默认不勾）')}</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
             {['日', '一', '二', '三', '四', '五', '六'].map((w, d) => (
               <label key={d} style={{ fontSize: 11 }}>
@@ -2041,7 +2179,7 @@ function PriceEditor({
               </label>
             ))}
           </div>
-          <div style={{ marginBottom: 2 }}>高峰时段（北京时间）</div>
+          <div style={{ marginBottom: 2 }}>{L('高峰时段（北京时间）')}</div>
           {windows.map((p, pi) => (
             <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
               <span style={{ fontSize: 10, color: t.text3 }}>{pi + 1}. 起</span>
@@ -2051,7 +2189,7 @@ function PriceEditor({
                   {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
               ))}
-              <span style={{ fontSize: 10, color: t.text3 }}>止</span>
+              <span style={{ fontSize: 10, color: t.text3 }}>{tt('end')}</span>
               {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
                 <select key={f} value={p[f]} onChange={(ev) => setWindows((ws) => ws.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)))}
                   style={{ fontSize: 12, padding: '1px 3px' }}>
@@ -2059,19 +2197,19 @@ function PriceEditor({
                 </select>
               ))}
               <button type="button" onClick={() => setWindows((ws) => ws.filter((_, xi) => xi !== pi))} disabled={windows.length <= 1}
-                style={{ fontSize: 11, padding: '1px 6px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text2, cursor: 'pointer' }}>删</button>
+                style={{ fontSize: 11, padding: '1px 6px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text2, cursor: 'pointer' }}>{tt('del')}</button>
             </div>
           ))}
           <button type="button" onClick={() => setWindows((ws) => [...ws, { sh: '9', sm: '00', eh: '12', em: '00' }])}
-            style={{ fontSize: 11, padding: '1px 8px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', marginBottom: 4 }}>+ 添加时段</button>
+            style={{ fontSize: 11, padding: '1px 8px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', marginBottom: 4 }}>{tt('addPeriod')}</button>
         </div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-        <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>保存单价</button>
-        <button type="button" onClick={reset} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', boxShadow: 'none' }}>重置价格</button>
-        {billing.combined && <span style={{ color: t.text3, fontSize: 10 }}>合并计价</span>}
-        {billing.discount !== undefined && billing.discount < 1 && <span style={{ color: t.brand, fontSize: 10 }}>Batch 半价 ×{billing.discount}</span>}
+        <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('saveUnit')}</button>
+        <button type="button" onClick={reset} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', boxShadow: 'none' }}>{tt('resetPrice')}</button>
+        {billing.combined && <span style={{ color: t.text3, fontSize: 10 }}>{L('合并计价')}</span>}
+        {billing.discount !== undefined && billing.discount < 1 && <span style={{ color: t.brand, fontSize: 10 }}>{L('Batch 半价')} ×{billing.discount}</span>}
         {msg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{msg}</span>}
       </div>
     </div>
@@ -2100,3 +2238,13 @@ function BucketRow(props: {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+

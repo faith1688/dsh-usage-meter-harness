@@ -181,7 +181,7 @@ function ledgerOf(
   // Seed a brand-new non-DeepSeek binding's ledger with the user-configured
   // 「非DeepSeek初始余额」so a newly-added model starts from that amount
   // (not 0). The seed survives as long as the entry is never touched.
-  if (entry === undefined) entry = balances[key] = { balance: runtimeConfig.initialBalance ?? 0, currency: defaultCurrency };
+  if (entry === undefined) entry = balances[key] = { balance: 0, currency: defaultCurrency };
   return entry;
 }
 
@@ -201,6 +201,9 @@ function broadcastBalance(_key: string, _entry: { balance: number; currency: str
 
 /** Live sessions seen by this plugin — kept for the (now in-memory-only) push path. */
 const activeSessions = new Set<object>();
+
+/** 当前正在使用（轮次进行中）的模型路由：设置页据此锁定该模型的编辑。 */
+let activeModel: { provider: string; model: string } | null = null;
 
 const priceOverrides: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string }> = {};
 
@@ -244,17 +247,27 @@ function applyPriceOverrides(): void {
       continue;
     }
     // Managed-fields replacement: the override fully owns billing semantics —
-    // EXCEPT a PURE-DISCOUNT override (Batch 半价：只带 discount/currency，不带
-    // 任何价格字段)，那种覆盖只改倍率、完整保留内置基价结构。
-    const pureDiscount = Object.keys(override.prices).every((k) => k === 'discount' || k === 'currency')
-      && override.prices.discount !== undefined;
+    // BUT only when it actually carries at least one managed billing field.
+    // A keep-mode/partial override (currency-only, or discount without prices)
+    // must preserve the bundled base structure — stripping here used to wipe
+    // every price to 0 (the "Batch 模板保存后输入框全清空" bug).
+    const hasManaged = Object.keys(override.prices).some((k) =>
+      (OVERRIDE_MANAGED_FIELDS as ReadonlyArray<string>).includes(k) && k !== 'discount'
+    );
     const stripped: Record<string, unknown> = { ...base };
-    if (!pureDiscount) {
+    if (hasManaged) {
       for (const f of OVERRIDE_MANAGED_FIELDS) delete stripped[f as string];
     }
     const row: ModelPricing = {
       ...(stripped as unknown as ModelPricing),
       ...override.prices,
+      // Invariant: the strict viewSchema requires numeric inputPerM/outputPerM.
+      // An override that owns billing via customRows (or a partial prices doc)
+      // strips these from the base — default them ONLY when neither the
+      // override nor a surviving base value provides a number (a pure-discount
+      // override keeps the base structure intact, so base numbers must win).
+      inputPerM: typeof override.prices.inputPerM === 'number' ? override.prices.inputPerM : (typeof (stripped as unknown as ModelPricing).inputPerM === 'number' ? (stripped as unknown as ModelPricing).inputPerM : 0),
+      outputPerM: typeof override.prices.outputPerM === 'number' ? override.prices.outputPerM : (typeof (stripped as unknown as ModelPricing).outputPerM === 'number' ? (stripped as unknown as ModelPricing).outputPerM : 0),
       currency: override.prices.currency ?? base.currency,
       source: 'user',
     };
@@ -262,14 +275,44 @@ function applyPriceOverrides(): void {
   }
 }
 
-/** The 用量 template for one model: user override, else derived from its base pricing. */
-function priceRowsOf(provider: string | null, model: string | null): BillingRow[] {
+/** The 用量 template for one model: user override, else derived from its base pricing.
+ *  `pricing` (when given, already peak-resolved by the caller) is authoritative for
+ *  CUSTOM-ROWS models: the popup rows must mirror exactly what billing charges. */
+function peakActiveBJ(pricing: ModelPricing | null | undefined, now: number): boolean {
+  if (!pricing) return false;
+  const b = new Date(now + 8 * 3600 * 1000);
+  const day = b.getUTCDay();
+  const min = b.getUTCHours() * 60 + b.getUTCMinutes();
+  const days = pricing.peakDays ?? [0, 1, 2, 3, 4, 5, 6];
+  const wins = pricing.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }];
+  // 与 prices.ts 的 resolvePricingForTime 同一套语义（含跨零点环绕窗口）。
+  return wins.some((w) => {
+    if (w.start < w.end) return days.includes(day) && min >= w.start && min < w.end;
+    if (min >= w.start) return days.includes(day);
+    if (min < w.end) return days.includes((day + 6) % 7);
+    return false;
+  });
+}
+
+/** 弹窗显示行的唯一来源优先级：customRows → override.rows → 内置推导。
+ *  override.rows 的峰谷行按北京时间解析出"此刻生效"的单价。 */
+function priceRowsOf(provider: string | null, model: string | null, pricing?: ModelPricing | null, now: number = Date.now()): BillingRow[] {
   if (provider === null || model === null) return [];
+  if (Array.isArray(pricing?.customRows) && pricing!.customRows!.length > 0) {
+    return pricing!.customRows!.map((r) => ({ label: r.label, buckets: r.buckets as BillingRow['buckets'], perM: r.perM }));
+  }
   const candidates = [provider, underlyingProvider(provider) ?? provider];
   for (const p of candidates) {
     const key = `${p}/${model}`;
     const overridden = priceOverrides[key]?.rows;
-    if (overridden !== undefined && overridden.length > 0) return overridden;
+    if (overridden !== undefined && overridden.length > 0) {
+      const activePeak = peakActiveBJ(pricing, now);
+      return overridden.map((r) => {
+        if (r.peakPerM === undefined && r.offPerM === undefined) return r; // 平价行
+        const v = activePeak ? r.peakPerM : r.offPerM;
+        return v === undefined ? r : { ...r, perM: v };
+      });
+    }
     const base = currentPrices.table.getRaw(key);
     if (base !== undefined) return rowsFromPricing(base);
   }
@@ -459,12 +502,14 @@ function pricingFor(provider: string | null, model: string | null, at?: number):
 
 // ── projection schema ────────────────────────────────────────────────────────
 const peakRatesSchema = zod
-  .object({ inputPerM: zod.number(), outputPerM: zod.number(), cacheReadPerM: zod.number().optional() })
+  .object({ inputPerM: zod.number().catch(0), outputPerM: zod.number().catch(0), cacheReadPerM: zod.number().optional() })
   .strict();
 const pricingSchema = zod
   .object({
-    inputPerM: zod.number(),
-    outputPerM: zod.number(),
+    // `.catch(0)` keeps a persisted/view row missing these (older override
+    // data) from failing the parse and blocking the whole session reload.
+    inputPerM: zod.number().catch(0),
+    outputPerM: zod.number().catch(0),
     cacheReadPerM: zod.number().optional(),
     cacheWritePerM: zod.number().optional(),
     combinedPerM: zod.number().optional(),
@@ -507,7 +552,13 @@ const accountBalanceSchema = zod
   .object({ currency: zod.string(), totalBalance: zod.number(), updatedAt: zod.number(), source: zod.enum(['api', 'computed']) })
   .strict();
 const billingRowSchema = zod
-  .object({ label: zod.string(), buckets: zod.array(zod.enum(['input', 'cacheRead', 'cacheWrite', 'output'])), perM: zod.number().optional() })
+  .object({
+    label: zod.string(),
+    buckets: zod.array(zod.enum(['input', 'cacheRead', 'cacheWrite', 'output'])),
+    perM: zod.number().optional(),
+    peakPerM: zod.number().optional(),
+    offPerM: zod.number().optional(),
+  })
   .strict();
 const usageCostSchema = zod
   .object({
@@ -533,6 +584,8 @@ const usageCostSchema = zod
     accountBalance: accountBalanceSchema.nullable(),
     balanceNeedsKey: zod.boolean(),
     turns: zod.array(turnCostSchema),
+    lastTurn: turnCostSchema.nullable().catch(null),
+    peakState: zod.enum(['peak', 'off']).nullable().catch(null),
     budget: zod.number().nullable(),
     remainingBudget: zod.number().nullable(),
   })
@@ -635,6 +688,8 @@ function emptyUsageCost(state: FoldState): UsageCostValue {
     accountBalance: null,
     balanceNeedsKey: false,
     turns,
+    lastTurn: turns.length > 0 ? turns[turns.length - 1] : null,
+    peakState: null,
     budget: safeBudget,
     remainingBudget: safeBudget === null ? null : safeBudget,
   };
@@ -863,6 +918,21 @@ const usageCostProjection = {
     const officialRow = officialKey !== null ? (BUNDLED_TABLE as Record<PriceKey, ModelPricing>)[officialKey as PriceKey] : undefined;
     const officialPrice = officialRow === undefined ? null : { pricing: officialRow, rows: rowsFromPricing(officialRow) };
     const budget = runtimeConfig.budget;
+    // 峰/谷状态标注：当前模型启用了峰谷计费时，按北京时间实时判定此刻
+    // 适用峰价还是谷价，弹窗在单价表头显示「（峰）/（谷）」。
+    let peakState: 'peak' | 'off' | null = null;
+    if (pricing !== null) {
+      const hasLegacyPeak = pricing.peak !== undefined && pricing.offPeak !== undefined;
+      const hasRowPeak = (pricing.customRows ?? []).some((r) => r.peakPerM !== undefined || r.offPerM !== undefined);
+      if (hasLegacyPeak || hasRowPeak) {
+        const b = new Date(Date.now() + 8 * 3600 * 1000);
+        const day = b.getUTCDay();
+        const min = b.getUTCHours() * 60 + b.getUTCMinutes();
+        const days = pricing.peakDays ?? [0, 1, 2, 3, 4, 5, 6];
+        const wins = pricing.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }];
+        peakState = days.includes(day) && wins.some((w) => min >= w.start && min < w.end) ? 'peak' : 'off';
+      }
+    }
     return {
       requestCount: state.requestCount,
       stepCount: state.stepCount,
@@ -877,7 +947,7 @@ const usageCostProjection = {
       model: state.model,
       pricing,
       basePricing: currentPrices.table.get(underlyingProvider(state.provider) ?? state.provider ?? '', state.model ?? '') ?? null,
-      priceRows: priceRowsOf(state.provider, state.model),
+      priceRows: priceRowsOf(state.provider, state.model, pricing),
       officialPrice,
       estimatedCost,
       currency,
@@ -886,6 +956,8 @@ const usageCostProjection = {
       accountBalance,
       balanceNeedsKey: isDeepSeekProvider(state.provider) && currentBalance === null,
       turns,
+      lastTurn: turns.length > 0 ? turns[turns.length - 1] : null,
+      peakState,
       budget,
       remainingBudget: budget === null ? null : safeNumber(budget - estimatedCost, 0),
     };
@@ -962,7 +1034,11 @@ class UsageMeterCore {
     if (deepSeekWanted && (currentBalance === null || now - currentBalance.fetchedAt >= ms)) void this.refreshBalance();
   }
 
-  async refreshRate(): Promise<void> {
+  /** 拉取 USD→CNY。闸门统一收口在这里：24h 内已新鲜就直接返回——不管调用方
+   *  是启动恢复、会话事件还是定时器，都只可能打一次日志。只有显式 force
+   *  （用户切换币种、建账换算）才绕过新鲜期。 */
+  async refreshRate(force = false): Promise<void> {
+    if (!force && Date.now() - lastRateFetchedAt < RATE_MAX_AGE_MS) return;
     if (this.rateRefreshing) return this.rateRefreshing;
     this.rateRefreshing = (async () => {
       try {
@@ -1110,9 +1186,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // Force a fresh USD→CNY rate on demand (popup currency switch).
   ctx.webServer.register({
     kind: 'exact',
+    path: '/api/usage-meter/active',
+    handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ active: activeModel }));
+    },
+  });
+  ctx.webServer.register({
+    kind: 'exact',
     path: '/api/usage-meter/refresh-rate',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
-      await meter.refreshRate();
+      await meter.refreshRate(true); // 用户手动点击刷新：绕过 24h 新鲜期
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, usdToCny: currentPrices.usdToCny, rateUpdatedAt: lastRateFetchedAt }));
     },
@@ -1211,7 +1295,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
               }
               if (patch.currency !== undefined && patch.currency !== ledgerEntry.currency) {
                 if (patch.balance === undefined) {
-                  if (lastRateFetchedAt === 0) await meter.refreshRate();
+                  if (lastRateFetchedAt === 0) await meter.refreshRate(true);
                   ledgerEntry.balance = toCurrency(ledgerEntry.balance, ledgerEntry.currency, String(patch.currency), currentPrices.usdToCny);
                 }
                 ledgerEntry.currency = String(patch.currency);
@@ -1223,7 +1307,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         }
         if (currencyChanged) {
           rateNeeded = true;
-          void meter.refreshRate();
+          void meter.refreshRate(true);
         }
         if (ledgerChanged && ledgerKey !== null && ledgerEntry !== null) broadcastBalance(ledgerKey, ledgerEntry, 'manual');
         if (patch.model !== undefined && patch.model !== null && patch.provider !== undefined && patch.provider !== null) {
@@ -1306,6 +1390,13 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     } catch {
       // keep the last known need on snapshot failure
     }
+    // 使用中锁定：轮次开始记录路由，轮次结束清除——设置页据此禁用该模型的
+    // 单价/余额编辑（跑 A 时锁 A；改 B 不受影响）。
+    if (event.type === 'turn/start') {
+      activeModel = provider !== null && model !== null ? { provider, model } : null;
+    } else if (event.type === 'turn/end') {
+      activeModel = null;
+    }
     // rc.7 safe: refresh the in-memory DeepSeek balance on every turn start; the
     // projection `view` reads it directly — nothing is written to the log.
     if (event.type === 'turn/start' && isDeepSeekProvider(provider)) void meter.refreshBalance();
@@ -1356,3 +1447,15 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
 }
 
 export { BILLING_TYPES, Config, costBreakdown, costOf, usageCostProjection };
+
+/** Test-only hooks: expose the save→apply→display pipeline internals so the
+ *  consistency suite can drive the REAL host code (not a copy). Not part of
+ *  the plugin contract; never consumed by the harness runtime. */
+export const __testInternals = {
+  get priceOverrides(): Record<string, unknown> {
+    return priceOverrides;
+  },
+  applyPriceOverrides,
+  priceRowsOf,
+  currentPrices,
+};

@@ -23,8 +23,9 @@
 import z from '@deepseek-ai/schemastery';
 import { z as zod } from 'zod';
 import type { Context } from '@deepseek-ai/cordis';
+import { PriceTable } from './prices.ts';
 import { costBreakdown, costOf } from './projection.ts';
-import type { UsageCostValue } from './projection.ts';
+import type { BillingRow, ModelPricing, UsageCostValue } from './projection.ts';
 import { BILLING_TYPES } from './billing.ts';
 declare const Config: z<Schemastery.ObjectS<{
     /** Display / ledger currency (CNY default; USD via the popup). */
@@ -57,6 +58,11 @@ declare const Config: z<Schemastery.ObjectS<{
 export declare const name = "usage-meter";
 /** Required services: settings (config namespace), projection registry, webserver (config route). */
 export declare const inject: string[];
+/** Re-apply every override onto the live price table (after load / edit / reset). */
+declare function applyPriceOverrides(): void;
+/** 弹窗显示行的唯一来源优先级：customRows → override.rows → 内置推导。
+ *  override.rows 的峰谷行按北京时间解析出"此刻生效"的单价。 */
+declare function priceRowsOf(provider: string | null, model: string | null, pricing?: ModelPricing | null, now?: number): BillingRow[];
 interface FoldTurn {
     turn: number;
     input: number;
@@ -164,8 +170,8 @@ declare const usageCostProjection: {
             provider: zod.ZodNullable<zod.ZodString>;
             model: zod.ZodNullable<zod.ZodString>;
             pricing: zod.ZodNullable<zod.ZodObject<{
-                inputPerM: zod.ZodNumber;
-                outputPerM: zod.ZodNumber;
+                inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                outputPerM: zod.ZodCatch<zod.ZodNumber>;
                 cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 cacheWritePerM: zod.ZodOptional<zod.ZodNumber>;
                 combinedPerM: zod.ZodOptional<zod.ZodNumber>;
@@ -178,13 +184,13 @@ declare const usageCostProjection: {
                     user: "user";
                 }>>;
                 peak: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 offPeak: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
@@ -194,8 +200,8 @@ declare const usageCostProjection: {
                     end: zod.ZodNumber;
                 }, zod.core.$strip>>>;
                 weekend: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
@@ -212,8 +218,8 @@ declare const usageCostProjection: {
                 }, zod.core.$strip>>>;
             }, zod.core.$strict>>;
             basePricing: zod.ZodNullable<zod.ZodObject<{
-                inputPerM: zod.ZodNumber;
-                outputPerM: zod.ZodNumber;
+                inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                outputPerM: zod.ZodCatch<zod.ZodNumber>;
                 cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 cacheWritePerM: zod.ZodOptional<zod.ZodNumber>;
                 combinedPerM: zod.ZodOptional<zod.ZodNumber>;
@@ -226,13 +232,13 @@ declare const usageCostProjection: {
                     user: "user";
                 }>>;
                 peak: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 offPeak: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
@@ -242,8 +248,8 @@ declare const usageCostProjection: {
                     end: zod.ZodNumber;
                 }, zod.core.$strip>>>;
                 weekend: zod.ZodOptional<zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
                 customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
@@ -268,11 +274,13 @@ declare const usageCostProjection: {
                     output: "output";
                 }>>;
                 perM: zod.ZodOptional<zod.ZodNumber>;
+                peakPerM: zod.ZodOptional<zod.ZodNumber>;
+                offPerM: zod.ZodOptional<zod.ZodNumber>;
             }, zod.core.$strict>>;
             officialPrice: zod.ZodNullable<zod.ZodObject<{
                 pricing: zod.ZodObject<{
-                    inputPerM: zod.ZodNumber;
-                    outputPerM: zod.ZodNumber;
+                    inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                    outputPerM: zod.ZodCatch<zod.ZodNumber>;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     cacheWritePerM: zod.ZodOptional<zod.ZodNumber>;
                     combinedPerM: zod.ZodOptional<zod.ZodNumber>;
@@ -285,13 +293,13 @@ declare const usageCostProjection: {
                         user: "user";
                     }>>;
                     peak: zod.ZodOptional<zod.ZodObject<{
-                        inputPerM: zod.ZodNumber;
-                        outputPerM: zod.ZodNumber;
+                        inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                        outputPerM: zod.ZodCatch<zod.ZodNumber>;
                         cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     }, zod.core.$strict>>;
                     offPeak: zod.ZodOptional<zod.ZodObject<{
-                        inputPerM: zod.ZodNumber;
-                        outputPerM: zod.ZodNumber;
+                        inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                        outputPerM: zod.ZodCatch<zod.ZodNumber>;
                         cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     }, zod.core.$strict>>;
                     peakOffPeakFrom: zod.ZodOptional<zod.ZodNumber>;
@@ -301,8 +309,8 @@ declare const usageCostProjection: {
                         end: zod.ZodNumber;
                     }, zod.core.$strip>>>;
                     weekend: zod.ZodOptional<zod.ZodObject<{
-                        inputPerM: zod.ZodNumber;
-                        outputPerM: zod.ZodNumber;
+                        inputPerM: zod.ZodCatch<zod.ZodNumber>;
+                        outputPerM: zod.ZodCatch<zod.ZodNumber>;
                         cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     }, zod.core.$strict>>;
                     customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
@@ -327,6 +335,8 @@ declare const usageCostProjection: {
                         output: "output";
                     }>>;
                     perM: zod.ZodOptional<zod.ZodNumber>;
+                    peakPerM: zod.ZodOptional<zod.ZodNumber>;
+                    offPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
             }, zod.core.$strip>>;
             estimatedCost: zod.ZodNumber;
@@ -357,6 +367,24 @@ declare const usageCostProjection: {
                 cacheWriteTokens: zod.ZodNumber;
                 reasoningTokens: zod.ZodNumber;
             }, zod.core.$strict>>;
+            lastTurn: zod.ZodCatch<zod.ZodNullable<zod.ZodObject<{
+                turn: zod.ZodNumber;
+                cost: zod.ZodNumber;
+                currency: zod.ZodString;
+                model: zod.ZodNullable<zod.ZodString>;
+                startedAt: zod.ZodNumber;
+                endedAt: zod.ZodNumber;
+                endReason: zod.ZodNullable<zod.ZodString>;
+                inputTokens: zod.ZodNumber;
+                outputTokens: zod.ZodNumber;
+                cacheReadTokens: zod.ZodNumber;
+                cacheWriteTokens: zod.ZodNumber;
+                reasoningTokens: zod.ZodNumber;
+            }, zod.core.$strict>>>;
+            peakState: zod.ZodCatch<zod.ZodNullable<zod.ZodEnum<{
+                peak: "peak";
+                off: "off";
+            }>>>;
             budget: zod.ZodNullable<zod.ZodNumber>;
             remainingBudget: zod.ZodNullable<zod.ZodNumber>;
         }, zod.core.$strict>;
@@ -367,3 +395,17 @@ declare const usageCostProjection: {
 /** Plugin entry: provide the service, register settings + the projection. */
 export declare function apply(ctx: Context, config?: Record<string, unknown>): void;
 export { BILLING_TYPES, Config, costBreakdown, costOf, usageCostProjection };
+/** Test-only hooks: expose the save→apply→display pipeline internals so the
+ *  consistency suite can drive the REAL host code (not a copy). Not part of
+ *  the plugin contract; never consumed by the harness runtime. */
+export declare const __testInternals: {
+    readonly priceOverrides: Record<string, unknown>;
+    applyPriceOverrides: typeof applyPriceOverrides;
+    priceRowsOf: typeof priceRowsOf;
+    currentPrices: {
+        table: PriceTable;
+        currency: string;
+        updatedAt: number;
+        usdToCny: number;
+    };
+};

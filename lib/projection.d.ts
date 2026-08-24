@@ -69,6 +69,10 @@ export interface BillingRow {
      *  custom-row model shows its real unit price instead of a 0 from the legacy
      *  bucket fields. Present only on rows derived from `customRows`. */
     perM?: number;
+    /** Flat-price (峰谷未启用) rows carry perM only. Peak/off-peak rows carry
+     *  BOTH — the popup resolves which one applies by Beijing time. */
+    peakPerM?: number;
+    offPerM?: number;
 }
 /** Per-bucket cost breakdown of one usage sample (each in the pricing currency). */
 export interface CostBreakdown {
@@ -154,6 +158,13 @@ export interface UsageCostValue {
     balanceNeedsKey: boolean;
     /** Per-turn cost ledger (most recent last). */
     turns: TurnCost[];
+    /** The latest turn (in-progress or just finished); null before the first turn.
+     *  Powers the popup's 本轮 readout — it starts at zero each turn and grows
+     *  as usage events land. */
+    lastTurn: TurnCost | null;
+    /** Peak/off-peak state of the CURRENT model's pricing at "now":
+     *  'peak' | 'off'; null when the model has no peak/off-peak pricing. */
+    peakState: 'peak' | 'off' | null;
     /** User-configured budget in `currency`; null = no budget set. */
     budget: number | null;
     /** `budget - estimatedCost`; null when no budget is set (may be negative). */
