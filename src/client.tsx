@@ -1515,7 +1515,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
                                                                   <span style={formLabel}>{tt('currency')}</span>
                                                                   <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
-                                                                    style={ctl({ maxWidth: 110 })}>
+                                                                    style={ctl({ maxWidth: 240 })}>
                                                                     <option value="CNY">CNY (¥)</option>
                                                                     <option value="USD">USD ($)</option>
                                                                   </select>
@@ -1526,7 +1526,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                         <input id={`um-bal-${k}`} value={e.balance}
                                                                           onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                                                           placeholder="如 100"
-                                                                          style={ctl({ maxWidth: 140 })} />
+                                                                          style={ctl({ maxWidth: 240 })} />
                                                                                                                                               </div>
                                                                     </>
                                                                   )}
@@ -1610,7 +1610,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     )}
                                   </div>
                                 )}
-                                <div style={{ borderTop: `1px solid ${t.borderSoft}`, margin: '12px 0 10px' }} />
                                 {/* 峰谷定价可见时（官方 DeepSeek / 峰谷模板 / 手动开启），
                                     基础单价格整体不渲染——两套价格只能出现一套 */}
                                 {e.templateId !== '' && !(deep || e.templateId === 'peak-off-peak' || e.peakOn) && (
