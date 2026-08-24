@@ -1,7 +1,7 @@
 {
   "name": "@faith1688/dsh-usage-meter-harness",
   "description": "为 DeepSeek Harness 打造的实时用量/费用/余额计量插件：在聊天输入框旁直接看到 tokens、花费与真实余额。",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -67,19 +67,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {},
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-llm": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-session": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-session-projection": "^0.1.1-rc.2",
-    "@deepseek-ai/dsh-settings": "^0.1.1-rc.2",
-    "react": "^18.2.0",
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "zod": "^4.4.3"
-  },
+  "peerDependencies": {},
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
