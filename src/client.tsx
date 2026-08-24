@@ -376,7 +376,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
         {rate !== null && (
-          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : rate >= 50 ? { color: '#38bdf8', textShadow: '0 0 8px rgba(56,189,248,0.8), 0 0 16px rgba(77,107,254,0.5)' } : { color: '#f59e0b', textShadow: '0 0 8px rgba(245,158,11,0.6)' }) }}>
+          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : rate >= 50 ? { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #4d6bfe 0%, #8b5cf6 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { display: 'inline-block', overflow: 'hidden', background: 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }) }}>
             · {tt('speed')} {rate.toFixed(1)} tokens/s
           </span>
         )}
