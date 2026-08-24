@@ -1548,6 +1548,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                     </>
                                                                   )}
                                                                 </div>
+                                <div style={{ borderTop: `1px solid ${t.borderSoft}`, margin: '12px 0 10px' }} />
                                 {/* R5 自定义单价项：templateId==='' 时用可增删的行；命名模板用下方固定格+峰谷。 */}
                                 {e.templateId === '' && (
                                   <div>
@@ -1590,6 +1591,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     )}
                                   </div>
                                 )}
+                                <div style={{ borderTop: `1px solid ${t.borderSoft}`, margin: '12px 0 10px' }} />
                                 {/* 峰谷定价可见时（官方 DeepSeek / 峰谷模板 / 手动开启），
                                     基础单价格整体不渲染——两套价格只能出现一套 */}
                                 {e.templateId !== '' && !(deep || e.templateId === 'peak-off-peak' || e.peakOn) && (
@@ -1729,13 +1731,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 {/* 操作按钮在锁定区外：点保存时给出红色提示而非无响应 */}
                                 </div>
                               </fieldset>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '6px 0 2px' }}>
                                 <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
-                                  style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+                                  style={{ fontSize: 13, padding: '6px 22px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
                                   {tt('saveUnit')}
                                 </button>
                                 <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
-                                  style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
+                                  style={{ fontSize: 13, padding: '6px 22px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
                                   {tt('resetPrice')}
                                 </button>
                                 {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
