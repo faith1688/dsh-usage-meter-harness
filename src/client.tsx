@@ -1300,6 +1300,25 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
   const select: CSSProperties = { padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
 
+  // ── 模型编辑器统一设计规范 ──────────────────────────────────────────
+  // 所有模板卡片共用同一套字号阶梯、控件高度、圆角与间距，杜绝"拼凑感"。
+  // 参考 DSH 官方设置页的控件规范：标签固定宽右对齐、输入框统一高度、
+  // 主/次/小按钮三档统一样式。
+  const LABEL_W = 96;              // 表单标签固定宽度（右对齐 → 各输入框左缘对齐成一条竖线）
+  const CTL_H = 30;                // 输入框 / 下拉框统一高度
+  const ctl = (extra?: CSSProperties): CSSProperties => ({
+    height: CTL_H, boxSizing: 'border-box', padding: '0 8px',
+    border: `1px solid ${t.border}`, borderRadius: 6,
+    fontSize: 13, background: t.card, color: t.text,
+    ...extra,
+  });
+  const formLabel: CSSProperties = { width: LABEL_W, minWidth: LABEL_W, fontSize: 13, color: t.text2, textAlign: 'right', whiteSpace: 'nowrap' };
+  const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.text2, margin: '0 0 6px' };
+  const hint: CSSProperties = { fontSize: 11, color: t.text3, lineHeight: 1.5 };
+  const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.accent, color: t.text, fontSize: 13, fontWeight: 500, cursor: 'pointer' };
+  const btnGhost: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 13, cursor: 'pointer' };
+  const btnSmall: CSSProperties = { height: 26, padding: '0 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 12, cursor: 'pointer' };
+
   const msToReadable = (ms: string): string => {
     const n = Number(ms);
     if (Number.isNaN(n) || n <= 0) return ms;
@@ -1467,7 +1486,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
                         const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
-                        const cell: CSSProperties = { width: '100%', minWidth: 80, maxWidth: 150, boxSizing: 'border-box', textAlign: 'right' as const, fontSize: 12, padding: '5px 8px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text };
+                        const cell: CSSProperties = { width: '100%', minWidth: 80, maxWidth: 150, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
                         return (
                           <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
                             {/* 折叠头部 */}
@@ -1486,34 +1505,34 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             {isOpen && (
                               <>
                               <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
-                              <div style={{ padding: '4px 12px 10px', display: 'flex', flexDirection: 'column', gap: 8, opacity: locked ? 0.75 : undefined }}>
+                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, opacity: locked ? 0.75 : undefined }}>
                                 {locked && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('lockedHint')}</div>
                                 )}
                                 {e.noSavedPrice && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('noSavedPrice')}</div>
                                 )}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
-                                                                  <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('currency')}</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
+                                                                  <span style={formLabel}>{tt('currency')}</span>
                                                                   <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
-                                                                    style={{ ...select, maxWidth: 110, fontSize: 12, padding: '2px 6px' }}>
+                                                                    style={ctl({ maxWidth: 110 })}>
                                                                     <option value="CNY">CNY (¥)</option>
                                                                     <option value="USD">USD ($)</option>
                                                                   </select>
                                                                   {!deep && (
                                                                     <>
-                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('balance')}</span>
+                                                                      <span style={formLabel}>{tt('balance')}</span>
                                                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                         <input id={`um-bal-${k}`} value={e.balance}
                                                                           onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                                                           placeholder="如 100"
-                                                                          style={{ ...input, maxWidth: 140, fontSize: 12, padding: '2px 6px' }} />
+                                                                          style={ctl({ maxWidth: 140 })} />
                                                                                                                                               </div>
                                                                     </>
                                                                   )}
                                                                   {templates.length > 0 && (
                                                                     <>
-                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('billingTemplate')}</span>
+                                                                      <span style={formLabel}>{tt('billingTemplate')}</span>
                                                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                         <select id={`um-tpl-${k}`} value={e.templateId}
                                                                           onChange={(ev) => {
@@ -1531,7 +1550,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                                 : [],
                                                                             } }));
                                                                           }}
-                                                                          style={{ ...select, maxWidth: 240, fontSize: 12, padding: '2px 6px' }}>
+                                                                          style={ctl({ maxWidth: 240 })}>
                                                                           <option value="">{L('（自定义）')}</option>
                                                                           {templates.map((tp) => <option key={tp.id} value={tp.id}>{L(tp.label)}</option>)}
                                                                         </select>
@@ -1541,10 +1560,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                   {e.combined && <div style={{ fontSize: 11, color: t.text2, gridColumn: '1 / -1' }}>{tt('discountNote')}</div>}
                                                                   {e.discount !== '' && (
                                                                     <>
-                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('batchDiscount')}</span>
+                                                                      <span style={formLabel}>{tt('batchDiscount')}</span>
                                                                       <input id={`um-disc-${k}`} value={e.discount}
                                                                         onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, discount: ev.target.value } }))}
-                                                                        placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '2px 6px', justifySelf: 'start' }} />
+                                                                        placeholder="如 0.5" style={ctl({ maxWidth: 90, justifySelf: 'start' })} />
                                                                     </>
                                                                   )}
                                                                 </div>
@@ -1552,7 +1571,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 {/* R5 自定义单价项：templateId==='' 时用可增删的行；命名模板用下方固定格+峰谷。 */}
                                 {e.templateId === '' && (
                                   <div>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>{L('自定义单价项（每行 = 单价 × 该行 token 数；峰谷价在下方「启用峰谷计费」里统一填）')}</div>
+                                    <div style={sectTitle}>{L('自定义单价项（每行 = 单价 × 该行 token 数；峰谷价在下方「启用峰谷计费」里统一填）')}</div>
                                     {e.customRows.map((r, ri) => {
                                       const usedElsewhere = new Set<CustomBucket>(e.customRows.map((x) => x.bucket));
                                       usedElsewhere.delete(r.bucket);
@@ -1576,7 +1595,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                           ) : (
                                             <input value={r.perM} placeholder={tt('yuanPerM')}
                                               onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, perM: ev.target.value }))}
-                                              style={{ ...input, maxWidth: 80, fontSize: 12, padding: '3px 6px' }} />
+                                              style={ctl({ maxWidth: 80 })} />
                                           )}
                                           <button type="button"
                                             onClick={() => delCustomRow(k, ri)}
@@ -1596,11 +1615,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     基础单价格整体不渲染——两套价格只能出现一套 */}
                                 {e.templateId !== '' && !(deep || e.templateId === 'peak-off-peak' || e.peakOn) && (
                                 <div>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>{tt('basePrice')}</div>
+                                  <div style={sectTitle}>{tt('basePrice')}</div>
                                   <div style={{ display: 'flex', gap: 8 }}>
                                     {columnsForTemplate(e.templateId, templates).map((f) => (
                                       <label key={f} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0 }}>
-                                        <span style={{ fontSize: 10, color: t.text3 }}>{FIELD_LABEL[f]}</span>
+                                        <span style={{ fontSize: 11, color: t.text3 }}>{FIELD_LABEL[f]}</span>
                                         <input id={`um-${f}-${k}`} value={e[f]}
                                           onChange={(ev) => editNum(k, f, ev.target.value)}
                                           placeholder={tt('yuanPerM')} style={cell} />
@@ -1635,7 +1654,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                             style={{ accentColor: t.accent }} />
                                           <span style={{ fontSize: 12, color: t.text2 }}>{tt('peakToggle')}</span>
                                         </label>
-                                        <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; {tt('uncheckIsOff')}</span>
+                                        <span style={hint}>峰: 高; 谷: 低; {tt('uncheckIsOff')}</span>
                                       </>
                                     )}
                                   </div>
@@ -1646,14 +1665,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                           {e.customRows.map((r, ri) => (
                                             <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                               <span style={{ fontSize: 11, color: t.text2, width: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{CUSTOM_BUCKET_LABEL[r.bucket]}</span>
-                                              <span style={{ fontSize: 10, color: t.text3 }}>{tt('peakPrice')}</span>
+                                              <span style={{ fontSize: 11, color: t.text3 }}>{tt('peakPrice')}</span>
                                               <input value={r.peakPerM} placeholder={tt('yuanPerM')}
                                                 onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, peakPerM: ev.target.value }))}
-                                                style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
-                                              <span style={{ fontSize: 10, color: t.text3 }}>{tt('offPrice')}</span>
+                                                style={ctl({ maxWidth: 90 })} />
+                                              <span style={{ fontSize: 11, color: t.text3 }}>{tt('offPrice')}</span>
                                               <input value={r.offPerM} placeholder={tt('yuanPerM')}
                                                 onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, offPerM: ev.target.value }))}
-                                                style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
+                                                style={ctl({ maxWidth: 90 })} />
                                             </div>
                                           ))}
                                         </div>
@@ -1661,10 +1680,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                       <div style={{ display: 'flex', gap: 8 }}>
                                         {([[L('输入(未命中)'), 'inputPeak', 'inputOff'], [L('缓存命中'), 'cachePeak', 'cacheOff'], [L('输出'), 'outPeak', 'outOff']] as const).map(([lab, pk, off]) => (
                                           <div key={pk} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0 }}>
-                                            <span style={{ fontSize: 10, color: t.text3 }}>{lab}</span>
+                                            <span style={{ fontSize: 11, color: t.text3 }}>{lab}</span>
                                             {([[pk, '峰价'], [off, '谷价']] as const).map(([fld, tag]) => (
                                               <label key={fld} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                <span style={{ fontSize: 10, color: t.text3, whiteSpace: 'nowrap' as const }}>{tt(tag === '峰价' ? 'peakPrice' : 'offPrice')}</span>
+                                                <span style={{ fontSize: 11, color: t.text3, whiteSpace: 'nowrap' as const }}>{tt(tag === '峰价' ? 'peakPrice' : 'offPrice')}</span>
                                                 <input id={`um-${fld}-${k}`} value={e[fld]}
                                                   onChange={(ev) => editNum(k, fld, ev.target.value)}
                                                   placeholder={tt('yuanPerM')} style={{ ...cell, flex: 1, minWidth: 0 }} />
@@ -1694,22 +1713,22 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                         {e.windows.map((p, pi) => (
                                           <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, flexWrap: 'wrap' as const }}>
                                             <span style={{ fontSize: 11, color: t.text3 }}>{pi + 1}.</span>
-                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('start')}</span>
+                                            <span style={{ fontSize: 11, color: t.text3 }}>{tt('start')}</span>
                                             {([['sh', 23], ['sm', 59]] as const).map(([f, max]) => (
                                               <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
                                                 onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
-                                                style={{ padding: '2px 4px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+                                                style={ctl({ height: 26, padding: '0 4px', fontSize: 12, borderRadius: 5 })}>
                                                 {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => (
                                                   <option key={v} value={v}>{v}</option>
                                                 ))}
                                               </select>
                                             ))}
-                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('hourUnit')}</span>
-                                            <span style={{ fontSize: 10, color: t.text3 }}>{tt('end')}</span>
+                                            <span style={{ fontSize: 11, color: t.text3 }}>{tt('hourUnit')}</span>
+                                            <span style={{ fontSize: 11, color: t.text3 }}>{tt('end')}</span>
                                             {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
                                               <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
                                                 onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
-                                                style={{ padding: '2px 4px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+                                                style={ctl({ height: 26, padding: '0 4px', fontSize: 12, borderRadius: 5 })}>
                                                 {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => (
                                                   <option key={v} value={v}>{v}</option>
                                                 ))}
@@ -1733,11 +1752,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                               </fieldset>
                               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '6px 0 2px' }}>
                                 <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
-                                  style={{ fontSize: 13, padding: '6px 22px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+                                  style={btnPrimary}>
                                   {tt('saveUnit')}
                                 </button>
                                 <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
-                                  style={{ fontSize: 13, padding: '6px 22px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>
+                                  style={btnGhost}>
                                   {tt('resetPrice')}
                                 </button>
                                 {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
@@ -2180,7 +2199,7 @@ function PriceEditor({
                   {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => <option key={v} value={v}>{v}</option>)}
                 </select>
               ))}
-              <span style={{ fontSize: 10, color: t.text3 }}>{tt('end')}</span>
+              <span style={{ fontSize: 11, color: t.text3 }}>{tt('end')}</span>
               {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
                 <select key={f} value={p[f]} onChange={(ev) => setWindows((ws) => ws.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)))}
                   style={{ fontSize: 12, padding: '1px 3px' }}>
