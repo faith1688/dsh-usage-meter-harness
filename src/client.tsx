@@ -337,9 +337,9 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           gap: 8,
           maxWidth: '100%',
           padding: '2px 8px',
-          border: `1px solid ${open ? t.border : 'transparent'}`,
+          border: `1px solid ${open ? 'rgba(77,107,254,0.45)' : 'transparent'}`,
           borderRadius: 999,
-          background: open ? t.accent : 'transparent',
+          background: open ? 'rgba(77,107,254,0.10)' : 'transparent',
           color: t.text2,
           fontSize: 11,
           lineHeight: '16px',
@@ -390,7 +390,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             zIndex: 40,
             width: 620,
             maxWidth: 'calc(100vw - 32px)',
-            background: t.card,
+            background: 'linear-gradient(180deg, rgba(77,107,254,0.06), rgba(255,255,255,0.98))',
             border: '1px solid rgba(77,107,254,0.35)',
             borderRadius: 12,
             boxShadow: '0 12px 32px rgba(31, 35, 40, 0.18), 0 0 26px rgba(77,107,254,0.16)',
@@ -401,7 +401,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           }}
         >
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>{usage.model ?? L('未选择模型')}</span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: t.brand }}>{usage.model ?? L('未选择模型')}</span>
             <span style={{ color: t.text3, fontSize: 11 }}>{usage.provider ?? ''}</span>
           </div>
           <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>
@@ -411,7 +411,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             {pricesConverted ? ` · ${L('汇率 1USD=')}${usage.usdToCny.toFixed(4)}CNY` : ''}
           </div>
 
-          <div style={{ ...row, borderBottom: `1px solid ${t.borderSoft}`, paddingTop: 8, paddingBottom: 8 }}>
+          <div style={{ ...row, borderBottom: '1px solid rgba(77,107,254,0.12)', paddingTop: 8, paddingBottom: 8 }}>
             <span style={{ color: t.text2 }}>{balanceKind === 'account' ? L('账户余额') : L('余额')}</span>
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
               <span style={{ fontWeight: 800, fontSize: 16, color: balanceKind === 'none' ? t.text3 : balanceNegative ? t.error : t.ok }}>
@@ -442,7 +442,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
 
           {/* budget (src 保留功能) */}
           {usage.budget !== null && (
-            <div style={{ borderTop: `1px solid ${t.borderSoft}`, marginTop: 4, paddingTop: 8 }}>
+            <div style={{ borderTop: '1px solid rgba(77,107,254,0.12)', marginTop: 4, paddingTop: 8 }}>
               <div style={{ ...row, paddingTop: 0 }}>
                 <span style={{ color: t.text2 }}>{L('预算')} {fmtMoney(usage.budget, usage.currency, usage)}</span>
                 <span style={{ color: t.text3 }}>{L('已用')} {fmtMoney(usage.estimatedCost, usage.currency, usage)}</span>
@@ -494,13 +494,13 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             )}
           </div>
 
-          <div style={{ ...row, color: t.text2, fontSize: 11, borderTop: `1px solid ${t.borderSoft}`, marginTop: 4, paddingTop: 6 }}>
+          <div style={{ ...row, color: t.text2, fontSize: 11, borderTop: '1px solid rgba(77,107,254,0.12)', marginTop: 4, paddingTop: 6 }}>
             <span>{L('请求')} {usage.requestCount} {tt('reqOk')} {usage.stepCount} {tt('reqTry')}</span>
             {hitRate !== null && <span style={{ color: t.text3 }}>{tt('cacheHitPct')} {hitRate}%</span>}
           </div>
 
           {turns.length > 0 && (
-            <div style={{ borderTop: `1px solid ${t.borderSoft}`, marginTop: 6, paddingTop: 6 }}>
+            <div style={{ borderTop: '1px solid rgba(77,107,254,0.12)', marginTop: 6, paddingTop: 6 }}>
               <div style={{ color: t.text3, fontSize: 11, marginBottom: 2 }}>{tt('perTurnCosts')}{turns.length}{tt('turnsTotal')}</div>
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                 {turns.map((turn, i) => {
@@ -510,9 +510,9 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
                     <Fragment key={turn.turn}>
                       {newDay && (
                         <div style={dateSep}>
-                          <span style={{ flex: 1, height: 1, background: t.borderSoft }} />
+                          <span style={{ flex: 1, height: 1, background: 'rgba(77,107,254,0.12)' }} />
                           <span>{fmtDate(turn.startedAt)}</span>
-                          <span style={{ flex: 1, height: 1, background: t.borderSoft }} />
+                          <span style={{ flex: 1, height: 1, background: 'rgba(77,107,254,0.12)' }} />
                         </div>
                       )}
                       <div style={{ ...row, padding: '2px 0' }}>
@@ -1864,7 +1864,7 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
   };
 
   return (
-    <div style={{ borderTop: `1px solid ${t.borderSoft}`, marginTop: 6, paddingTop: 6 }}>
+    <div style={{ borderTop: '1px solid rgba(77,107,254,0.12)', marginTop: 6, paddingTop: 6 }}>
       <button
         type="button"
         onClick={() => setOpenSettings((o) => !o)}
