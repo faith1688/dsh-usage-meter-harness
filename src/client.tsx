@@ -1313,9 +1313,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     ...extra,
   });
   const formLabel: CSSProperties = { width: LABEL_W, minWidth: LABEL_W, fontSize: 13, color: t.text2, textAlign: 'right', whiteSpace: 'nowrap' };
-  const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.text2, margin: '0 0 6px' };
+  const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.brand, margin: '0 0 6px' };
   const hint: CSSProperties = { fontSize: 11, color: t.text3, lineHeight: 1.5 };
-  const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.accent, color: t.text, fontSize: 13, fontWeight: 500, cursor: 'pointer' };
+  const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.brand, color: '#ffffff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(31,35,40,0.15)' };
   const btnGhost: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 13, cursor: 'pointer' };
   const btnSmall: CSSProperties = { height: 26, padding: '0 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 12, cursor: 'pointer' };
 
@@ -1486,7 +1486,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
                         const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
-                        const cell: CSSProperties = { width: '100%', minWidth: 80, maxWidth: 150, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+                        const cell: CSSProperties = { width: '100%', minWidth: 80, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
                         return (
                           <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
                             {/* 折叠头部 */}
@@ -1515,7 +1515,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
                                                                   <span style={formLabel}>{tt('currency')}</span>
                                                                   <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
-                                                                    style={ctl({ maxWidth: 240 })}>
+                                                                    style={ctl({ width: '100%' })}>
                                                                     <option value="CNY">CNY (¥)</option>
                                                                     <option value="USD">USD ($)</option>
                                                                   </select>
@@ -1526,7 +1526,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                         <input id={`um-bal-${k}`} value={e.balance}
                                                                           onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                                                           placeholder="如 100"
-                                                                          style={ctl({ maxWidth: 240 })} />
+                                                                          style={ctl({ width: '100%' })} />
                                                                                                                                               </div>
                                                                     </>
                                                                   )}
@@ -1550,7 +1550,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                                 : [],
                                                                             } }));
                                                                           }}
-                                                                          style={ctl({ maxWidth: 240 })}>
+                                                                          style={ctl({ width: '100%' })}>
                                                                           <option value="">{L('（自定义）')}</option>
                                                                           {templates.map((tp) => <option key={tp.id} value={tp.id}>{L(tp.label)}</option>)}
                                                                         </select>
@@ -1658,7 +1658,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     )}
                                   </div>
                                   {e.peakOn && (
-                                    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, padding: '6px 8px', background: 'rgba(139,148,158,0.06)', borderRadius: 4 }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, padding: '6px 8px', background: 'rgba(77,107,254,0.07)', borderRadius: 4 }}>
                                       {e.templateId === '' ? (
                                         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
                                           {e.customRows.map((r, ri) => (
