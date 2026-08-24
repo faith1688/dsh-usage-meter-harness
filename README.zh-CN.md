@@ -34,7 +34,7 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 
 ### 方式三 —— 一行命令安装，不需要 pnpm（推荐）
 
-`ash
+```bash
 npx -y @faith1688/dsh-usage-meter-harness
 `
 
