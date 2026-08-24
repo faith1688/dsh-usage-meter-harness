@@ -337,9 +337,9 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           gap: 8,
           maxWidth: '100%',
           padding: '2px 8px',
-          border: `1px solid ${open ? 'rgba(77,107,254,0.45)' : 'transparent'}`,
+          border: `1px solid ${open ? 'rgba(77,107,254,0.55)' : 'rgba(77,107,254,0.30)'}`,
           borderRadius: 999,
-          background: open ? 'rgba(77,107,254,0.10)' : 'transparent',
+          background: open ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(124,92,255,0.08))' : 'linear-gradient(90deg, rgba(77,107,254,0.10), rgba(124,92,255,0.04))',
           color: t.text2,
           fontSize: 11,
           lineHeight: '16px',
@@ -348,7 +348,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           transition: 'background .12s ease, border-color .12s ease',
         }}
       >
-        <span style={{ fontWeight: 600, color: t.text, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontWeight: 700, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
           {usage.model ?? L('未选择模型')}
         </span>
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>·</span>
@@ -375,7 +375,11 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           </span>
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
-        {rate !== null && <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>· {tt('speed')} {rate.toFixed(1)} tokens/s</span>}
+        {rate !== null && (
+          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { color: rate >= 50 ? '#f59e0b' : '#38bdf8' }) }}>
+            · {tt('speed')} {rate.toFixed(1)} tokens/s
+          </span>
+        )}
         <span style={{ color: t.text3, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .12s ease', fontSize: 9 }}>▼</span>
       </button>
 
@@ -1263,6 +1267,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
 
   const resetModelPrice = (provider: string, model: string) => {
     const k = draftKeyOf(provider, model);
+    if (k === activeKeyRef.current) {
+      // 使用中锁定：模型正在跑，重置与保存一样禁止
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: tt('lockedSaveMsg') } }));
+      window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
+      return;
+    }
     // 重置 = 丢弃未保存修改，回退到「该模型上次已保存的价格」；DeepSeek 官方模型
     // 且从未改过 → 回退到官方价（seedEntry 里已含官方预填）。
     setEdits((s) => ({ ...s, [k]: seedEntry(k, overrides, balances) }));
@@ -1750,12 +1760,12 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 </div>
                               </fieldset>
                               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '2px 0 12px' }}>
-                                <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
-                                  style={btnPrimary}>
+                                <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)} disabled={locked}
+                                  style={{ ...btnPrimary, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
                                   {tt('saveUnit')}
                                 </button>
-                                <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)}
-                                  style={btnGhost}>
+                                <button type="button" onClick={() => void resetModelPrice(active.provider, m.model)} disabled={locked}
+                                  style={{ ...btnGhost, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
                                   {tt('resetPrice')}
                                 </button>
                                 {st !== undefined && <span style={{ fontSize: 11, color: st.ok ? t.ok : t.error, whiteSpace: 'nowrap' }}>{st.msg}</span>}
