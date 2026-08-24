@@ -391,9 +391,9 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             width: 620,
             maxWidth: 'calc(100vw - 32px)',
             background: t.card,
-            border: `1px solid ${t.border}`,
+            border: '1px solid rgba(77,107,254,0.35)',
             borderRadius: 12,
-            boxShadow: '0 12px 32px rgba(31, 35, 40, 0.18)',
+            boxShadow: '0 12px 32px rgba(31, 35, 40, 0.18), 0 0 26px rgba(77,107,254,0.16)',
             padding: '12px 14px',
             fontSize: 12,
             color: t.text,
@@ -1297,8 +1297,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
   const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 132 };
-  const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
-  const select: CSSProperties = { padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+  const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+  const select: CSSProperties = { padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
 
   // ── 模型编辑器统一设计规范 ──────────────────────────────────────────
   // 所有模板卡片共用同一套字号阶梯、控件高度、圆角与间距，杜绝"拼凑感"。
@@ -1308,7 +1308,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const CTL_H = 30;                // 输入框 / 下拉框统一高度
   const ctl = (extra?: CSSProperties): CSSProperties => ({
     height: CTL_H, boxSizing: 'border-box', padding: '0 8px',
-    border: `1px solid ${t.border}`, borderRadius: 6,
+    border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6,
     fontSize: 13, background: t.card, color: t.text,
     ...extra,
   });
@@ -1316,8 +1316,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.brand, margin: '0 0 6px' };
   const hint: CSSProperties = { fontSize: 11, color: t.text3, lineHeight: 1.5 };
   const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.brand, color: '#ffffff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(31,35,40,0.15)' };
-  const btnGhost: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 13, cursor: 'pointer' };
-  const btnSmall: CSSProperties = { height: 26, padding: '0 12px', borderRadius: 6, border: `1px solid ${t.border}`, background: 'transparent', color: t.text2, fontSize: 12, cursor: 'pointer' };
+  const btnGhost: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: 'transparent', color: t.text2, fontSize: 13, cursor: 'pointer' };
+  const btnSmall: CSSProperties = { height: 26, padding: '0 12px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: 'transparent', color: t.text2, fontSize: 12, cursor: 'pointer' };
 
   const msToReadable = (ms: string): string => {
     const n = Number(ms);
@@ -1358,7 +1358,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 11, color: t.text3 }}>Language</span>
           <select value={lang} onChange={(ev) => { const v = ev.target.value as Lang; setLangState(v); setLang(v); bump(); }}
-            style={{ padding: '2px 6px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+            style={{ padding: '2px 6px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
             <option value="zh">{L('中文')}</option>
             <option value="en">English</option>
           </select>
@@ -1406,11 +1406,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                   const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
                   if (r.ok) { const d = await r.json() as { usdToCny?: number; rateUpdatedAt?: number }; setPageRate({ usdToCny: typeof d.usdToCny === 'number' ? d.usdToCny : pageRate.usdToCny, updatedAt: typeof d.rateUpdatedAt === 'number' ? d.rateUpdatedAt : Date.now() }); }
                 } catch { /* ignore */ }
-              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
+              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: `1px solid ${t.border}`, background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
+            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
               {saving ? tt('savingUnit') : tt('save')}
             </button>            {saveMsg !== '' && (
               <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
@@ -1436,7 +1436,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                     type="button"
                     onClick={() => void saveAllModels()}
                     disabled={savingAll}
-                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: `1px solid ${t.border}`, background: savingAll ? 'rgba(139,148,158,0.10)' : t.accent, color: savingAll ? t.text3 : t.text, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: savingAll ? 'rgba(139,148,158,0.10)' : t.accent, color: savingAll ? t.text3 : t.text, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
                     {savingAll ? 'saving' : L('一键保存全部')}
                   </button>
@@ -1486,14 +1486,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
                         const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
-                        const cell: CSSProperties = { width: '100%', minWidth: 80, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+                        const cell: CSSProperties = { width: '100%', minWidth: 80, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
                         return (
-                          <div key={m.model} style={{ border: `1px solid ${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                          <div key={m.model} style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(77,107,254,0.06), 0 2px 12px rgba(31,35,40,0.08), 0 0 20px rgba(77,107,254,0.12)', background: 'linear-gradient(180deg, rgba(77,107,254,0.05), rgba(77,107,254,0.01))' }}>
                             {/* 折叠头部 */}
                             <button
                               type="button"
                               onClick={() => setExpanded((s) => ({ ...s, [k]: !isOpen }))}
-                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? t.card : 'transparent', color: t.text, cursor: 'pointer' }}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(77,107,254,0.03))' : 'rgba(77,107,254,0.05)', color: t.text, cursor: 'pointer', borderBottom: isOpen ? '1px solid rgba(77,107,254,0.15)' : 'none' }}
                             >
                               <span style={{ fontSize: 10, color: t.text3 }}>{isOpen ? '▼' : '▶'}</span>
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
@@ -1505,7 +1505,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             {isOpen && (
                               <>
                               <fieldset disabled={locked} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
-                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, opacity: locked ? 0.75 : undefined }}>
+                              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, opacity: locked ? 0.75 : undefined, background: 'linear-gradient(180deg, rgba(77,107,254,0.04), rgba(77,107,254,0.006))' }}>
                                 {locked && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('lockedHint')}</div>
                                 )}
@@ -1606,7 +1606,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     {e.customRows.length < CUSTOM_BUCKETS.length && (
                                       <button type="button"
                                         onClick={() => addCustomRow(k)}
-                                        style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('customAddRow')}</button>
+                                        style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('customAddRow')}</button>
                                     )}
                                   </div>
                                 )}
@@ -1741,7 +1741,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                         ))}
                                         <button type="button"
                                           onClick={() => setEdits((s) => ({ ...s, [k]: { ...e, windows: [...e.windows, { sh: '9', sm: '00', eh: '12', em: '00' }] } }))}
-                                          style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('addPeriod')}</button>
+                                          style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('addPeriod')}</button>
                                       </div>
                                     </div>
                                   )}
@@ -1749,7 +1749,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 {/* 操作按钮在锁定区外：点保存时给出红色提示而非无响应 */}
                                 </div>
                               </fieldset>
-                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '6px 0 2px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, padding: '2px 0 12px' }}>
                                 <button type="button" onClick={() => void saveModelPrice(active.provider, m.model)}
                                   style={btnPrimary}>
                                   {tt('saveUnit')}
@@ -1885,7 +1885,7 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
               <option value="USD">{L('USD（美元）')}</option>
             </select>
             {isDeepSeek && (
-              <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+              <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.accent, color: t.text, cursor: 'pointer' }}>
                 {saved ? L('已保存') : tt('save')}
               </button>
             )}
@@ -1898,7 +1898,7 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
               <input value={cfgBalance} onChange={(e) => { setCfgBalance(e.target.value); setBalanceDirty(true); }} placeholder={`如 100${unitSym}`} style={{ width: 84, fontSize: 12, padding: '2px 4px' }} />
               <label style={{ fontSize: 11, color: t.text2 }}>{L('充值（')}{unitSym}{L('，可负）')}</label>
               <input value={cfgRecharge} onChange={(e) => setCfgRecharge(e.target.value)} placeholder={`如 20${unitSym}`} style={{ width: 84, fontSize: 12, padding: '2px 4px' }} />
-              <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
+              <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.accent, color: t.text, cursor: 'pointer' }}>
                 {saved ? L('已保存') : tt('save')}
               </button>
               {saveMsg !== '' && <span style={{ color: t.text2, fontSize: 10 }}>{saveMsg}</span>}
@@ -2206,17 +2206,17 @@ function PriceEditor({
                 </select>
               ))}
               <button type="button" onClick={() => setWindows((ws) => ws.filter((_, xi) => xi !== pi))} disabled={windows.length <= 1}
-                style={{ fontSize: 11, padding: '1px 6px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text2, cursor: 'pointer' }}>{tt('del')}</button>
+                style={{ fontSize: 11, padding: '1px 6px', borderRadius: 5, border: '1px solid rgba(77,107,254,0.35)', background: t.card, color: t.text2, cursor: 'pointer' }}>{tt('del')}</button>
             </div>
           ))}
           <button type="button" onClick={() => setWindows((ws) => [...ws, { sh: '9', sm: '00', eh: '12', em: '00' }])}
-            style={{ fontSize: 11, padding: '1px 8px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', marginBottom: 4 }}>{tt('addPeriod')}</button>
+            style={{ fontSize: 11, padding: '1px 8px', borderRadius: 5, border: '1px solid rgba(77,107,254,0.35)', background: t.card, color: t.text, cursor: 'pointer', marginBottom: 4 }}>{tt('addPeriod')}</button>
         </div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-        <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('saveUnit')}</button>
-        <button type="button" onClick={reset} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', boxShadow: 'none' }}>{tt('resetPrice')}</button>
+        <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.accent, color: t.text, cursor: 'pointer' }}>{tt('saveUnit')}</button>
+        <button type="button" onClick={reset} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.card, color: t.text, cursor: 'pointer', boxShadow: 'none' }}>{tt('resetPrice')}</button>
         {billing.combined && <span style={{ color: t.text3, fontSize: 10 }}>{L('合并计价')}</span>}
         {billing.discount !== undefined && billing.discount < 1 && <span style={{ color: t.brand, fontSize: 10 }}>{L('Batch 半价')} ×{billing.discount}</span>}
         {msg !== '' && <span style={{ color: t.text2, fontSize: 10 }}>{msg}</span>}

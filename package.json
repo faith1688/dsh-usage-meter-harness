@@ -1,7 +1,7 @@
 {
   "name": "@faith1688/dsh-usage-meter-harness",
   "description": "为 DeepSeek Harness 打造的实时用量/费用/余额计量插件：在聊天输入框旁直接看到 tokens、花费与真实余额。",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
