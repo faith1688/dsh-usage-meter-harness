@@ -100,17 +100,20 @@ function configPath(): string {
   return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'usage-meter.json');
 }
 
-const providerConfigs: Record<string, { currency?: string }> = {};
+const providerConfigs: Record<string, { currency?: string; sharedBalance?: boolean }> = {};
 const balances: Record<string, { balance: number; currency: string }> = {};
 /** Per-session last usage sample (turn/step) — used to compute delta deductions. */
 const lastUsageBySession = new WeakMap<object, { turn: number; step: number; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>();
 /** Per-session request (step) start time, mirroring the fold's `stepStart` for the live ledger path. */
 const stepStartBySession = new WeakMap<object, { turn: number; step: number; at: number }>();
 
-/** Binding key for a (provider, model) pair: official → vendor, custom → model. */
+/** Binding key for a (provider, model) pair: shared-balance provider → vendor,
+ *  official → vendor, custom → model. When the user turns on 「共享余额」 for a
+ *  provider, ALL models under it bill one wallet (`p:<provider>`). */
 function balanceKeyOf(provider: string | null, model: string | null): string | null {
   if (provider === null || model === null) return null;
   const real = underlyingProvider(provider) ?? provider;
+  if (providerConfigs[real]?.sharedBalance === true) return `p:${real}`;
   if (BUNDLED_TABLE[`${real}/${model}`] !== undefined) return `p:${real}`;
   return `m:${real}/${model}`;
 }
@@ -122,7 +125,10 @@ function ledgerOf(
 ): { balance: number; currency: string } | null {
   if (key === null || key.startsWith('p:deepseek')) return null;
   let entry = balances[key];
-  if (entry === undefined) entry = balances[key] = { balance: 0, currency: defaultCurrency };
+  // Seed a brand-new non-DeepSeek binding's ledger with the user-configured
+  // 「非DeepSeek初始余额」so a newly-added model starts from that amount
+  // (not 0). The seed survives as long as the entry is never touched.
+  if (entry === undefined) entry = balances[key] = { balance: runtimeConfig.initialBalance ?? 0, currency: defaultCurrency };
   return entry;
 }
 
@@ -145,6 +151,16 @@ const activeSessions = new Set<object>();
 
 const priceOverrides: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }> = {};
 
+/** The billing fields a user override OWNS. When an override exists it must be
+ *  the AUTHORITATIVE cost model: these fields are stripped from the bundled
+ *  base before merging, so switching templates can never leave a stale field
+ *  (e.g. an old cacheReadPerM) billing behind the user's chosen template. */
+const OVERRIDE_MANAGED_FIELDS: ReadonlyArray<keyof ModelPricing> = [
+  'inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM',
+  'combinedPerM', 'discount', 'peak', 'offPeak', 'peakDays', 'peakWindows',
+  'weekend', 'peakOffPeakFrom', 'customRows',
+];
+
 /** Re-apply every override onto the live price table (after load / edit / reset). */
 function applyPriceOverrides(): void {
   for (const [key, override] of Object.entries(priceOverrides)) {
@@ -152,10 +168,11 @@ function applyPriceOverrides(): void {
     const base = currentPrices.table.getRaw(key) ?? (BUNDLED_TABLE as Record<PriceKey, ModelPricing>)[key as PriceKey];
     if (base === undefined) {
       const p = override.prices;
-      if (typeof p.inputPerM !== 'number' || typeof p.outputPerM !== 'number') continue;
+      const hasCustom = Array.isArray(p.customRows) && p.customRows.length > 0;
+      if ((typeof p.inputPerM !== 'number' || typeof p.outputPerM !== 'number') && !hasCustom) continue;
       const row: ModelPricing = {
-        inputPerM: p.inputPerM,
-        outputPerM: p.outputPerM,
+        inputPerM: typeof p.inputPerM === 'number' ? p.inputPerM : 0,
+        outputPerM: typeof p.outputPerM === 'number' ? p.outputPerM : 0,
         ...(p.cacheReadPerM !== undefined ? { cacheReadPerM: p.cacheReadPerM } : {}),
         ...(p.cacheWritePerM !== undefined ? { cacheWritePerM: p.cacheWritePerM } : {}),
         ...(p.combinedPerM !== undefined ? { combinedPerM: p.combinedPerM } : {}),
@@ -167,13 +184,23 @@ function applyPriceOverrides(): void {
         ...(p.peakOffPeakFrom !== undefined ? { peakOffPeakFrom: p.peakOffPeakFrom } : {}),
         ...(p.weekend !== undefined ? { weekend: p.weekend } : {}),
         ...(p.currency !== undefined ? { currency: p.currency } : {}),
+        ...(hasCustom ? { customRows: p.customRows! } : {}),
         source: 'user',
       };
       currentPrices.table.merge({ [key as PriceKey]: row });
       continue;
     }
+    // Managed-fields replacement: the override fully owns billing semantics —
+    // EXCEPT a PURE-DISCOUNT override (Batch 半价：只带 discount/currency，不带
+    // 任何价格字段)，那种覆盖只改倍率、完整保留内置基价结构。
+    const pureDiscount = Object.keys(override.prices).every((k) => k === 'discount' || k === 'currency')
+      && override.prices.discount !== undefined;
+    const stripped: Record<string, unknown> = { ...base };
+    if (!pureDiscount) {
+      for (const f of OVERRIDE_MANAGED_FIELDS) delete stripped[f as string];
+    }
     const row: ModelPricing = {
-      ...base,
+      ...(stripped as unknown as ModelPricing),
       ...override.prices,
       currency: override.prices.currency ?? base.currency,
       source: 'user',
@@ -196,25 +223,32 @@ function priceRowsOf(provider: string | null, model: string | null): BillingRow[
   return defaultUnknownRows();
 }
 
-function loadPersistedConfig(): Record<string, unknown> {
+/** Shape of `$DSH_HOME/usage-meter.json` — EXTRA state ONLY (per-provider
+ *  currency, per-model price overrides, per-binding ledger). */
+interface ExtraStateDoc {
+  providers?: Record<string, { currency?: string; sharedBalance?: boolean; initialBalance?: number; topUps?: Array<{ amount: number }> }>;
+  priceOverrides?: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }>;
+  balances?: Record<string, { balance: number; currency: string }>;
+}
+
+/** Load the EXTRA state from `usage-meter.json` and seed the module maps.
+ *  Global scalar settings (currency / budget / priceSourceUrl / refreshIntervalMs /
+ *  deepseekApiKey) are deliberately NOT carried here: they belong to the
+ *  `usage-meter` settings namespace, whose single canonical write path is
+ *  `scope.update()` (→ settings.yaml). Keeping the API key out of this
+ *  extra-state file removes a plaintext-secret leak, and removing the
+ *  globals here fixes the two-writers-desync between the popup (file) and the
+ *  settings namespace (settings.yaml). */
+function loadPersistedConfig(): void {
   try {
     const p = configPath();
-    if (!existsSync(p)) return {};
-    const doc = JSON.parse(readFileSync(p, 'utf8')) as {
-      providers?: Record<string, { currency?: string; initialBalance?: number; topUps?: Array<{ amount: number }> }>;
-      priceOverrides?: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }>;
-      balances?: Record<string, { balance: number; currency: string }>;
-      currency?: string;
-      initialBalance?: number;
-      budget?: number;
-      priceSourceUrl?: string;
-      refreshIntervalMs?: number;
-      deepseekApiKey?: string;
-    };
+    if (!existsSync(p)) return;
+    const doc = JSON.parse(readFileSync(p, 'utf8')) as ExtraStateDoc;
     if (doc.providers) {
       for (const [provider, cfg] of Object.entries(doc.providers)) {
-        const pc: { currency?: string } = {};
+        const pc: { currency?: string; sharedBalance?: boolean } = {};
         if (cfg.currency !== undefined) pc.currency = cfg.currency;
+        if (cfg.sharedBalance !== undefined) pc.sharedBalance = cfg.sharedBalance === true;
         providerConfigs[provider] = pc;
         // Migrate the legacy manual balance (initialBalance + topUps) into the
         // global ledger under the vendor binding key.
@@ -229,32 +263,16 @@ function loadPersistedConfig(): Record<string, unknown> {
       applyPriceOverrides();
     }
     if (doc.balances) Object.assign(balances, doc.balances);
-    const global: Record<string, unknown> = {};
-    if (typeof doc.currency === 'string' && doc.currency !== '') global.currency = doc.currency;
-    if (typeof doc.initialBalance === 'number' && Number.isFinite(doc.initialBalance)) global.initialBalance = doc.initialBalance;
-    if (typeof doc.budget === 'number' && Number.isFinite(doc.budget)) global.budget = doc.budget;
-    if (doc.priceSourceUrl !== undefined) global.priceSourceUrl = doc.priceSourceUrl;
-    if (doc.refreshIntervalMs !== undefined) global.refreshIntervalMs = doc.refreshIntervalMs;
-    if (doc.deepseekApiKey !== undefined) global.deepseekApiKey = doc.deepseekApiKey;
-    return global;
   } catch {
-    return {};
+    // ignore
   }
 }
 
-/** Persist EVERY persisted state — the three per-model/per-provider blocks PLUS
- *  the global settings (currency, initialBalance, budget, priceSourceUrl,
- *  refreshIntervalMs, deepseekApiKey) read from the `runtimeConfig` mirror.
- *  This is what makes globals survive a server restart. */
+/** Persist the EXTRA state only. Global settings live in the settings namespace
+ *  (written via `scope.update`), never duplicated into this file. */
 function savePersistedConfig(): void {
   try {
-    const payload: Record<string, unknown> = { providers: providerConfigs, priceOverrides, balances };
-    if (typeof runtimeConfig.currency === 'string' && runtimeConfig.currency !== '') payload.currency = runtimeConfig.currency;
-    if (typeof runtimeConfig.initialBalance === 'number') payload.initialBalance = runtimeConfig.initialBalance;
-    if (typeof runtimeConfig.budget === 'number') payload.budget = runtimeConfig.budget;
-    if (typeof runtimeConfig.priceSourceUrl === 'string' && runtimeConfig.priceSourceUrl !== '') payload.priceSourceUrl = runtimeConfig.priceSourceUrl;
-    if (typeof runtimeConfig.refreshIntervalMs === 'number' && Number.isFinite(runtimeConfig.refreshIntervalMs)) payload.refreshIntervalMs = runtimeConfig.refreshIntervalMs;
-    if (typeof runtimeConfig.deepseekApiKey === 'string' && runtimeConfig.deepseekApiKey !== '') payload.deepseekApiKey = runtimeConfig.deepseekApiKey;
+    const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances };
     writeFileSync(configPath(), JSON.stringify(payload, null, 2), 'utf8');
   } catch (err) {
     console.warn('[usage-meter] failed to persist config:', err);
@@ -288,32 +306,12 @@ function totalCostInCurrency(
 }
 
 // ── debounced persistence (usage hot path only) ───────────────────────────────
+// The debounce timers + process-exit flush are fiber-scoped (created inside
+// `apply`, torn down by `ctx.effect`) so a plugin reload never leaks a timer
+// or leaves a stale `process.on('exit')` listener behind. These are immutable
+// cadence constants; per-fiber state lives in `apply`.
 const PERSIST_DEBOUNCE_MS = 400;
 const PERSIST_MAX_WAIT_MS = 2000;
-let persistDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let persistMaxWaitTimer: ReturnType<typeof setTimeout> | null = null;
-
-function flushPersist(): void {
-  if (persistDebounceTimer === null && persistMaxWaitTimer === null) return;
-  if (persistDebounceTimer !== null) {
-    clearTimeout(persistDebounceTimer);
-    persistDebounceTimer = null;
-  }
-  if (persistMaxWaitTimer !== null) {
-    clearTimeout(persistMaxWaitTimer);
-    persistMaxWaitTimer = null;
-  }
-  savePersistedConfig();
-}
-
-function schedulePersist(): void {
-  if (persistMaxWaitTimer === null) persistMaxWaitTimer = setTimeout(flushPersist, PERSIST_MAX_WAIT_MS);
-  if (persistDebounceTimer !== null) clearTimeout(persistDebounceTimer);
-  persistDebounceTimer = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
-}
-
-process.on('beforeExit', flushPersist);
-process.on('exit', flushPersist);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const VISION_TOOLKIT_PREFIX = 'vision-toolkit-';
@@ -400,6 +398,13 @@ const pricingSchema = zod
     peakDays: zod.array(zod.number().int().min(0).max(6)).optional(),
     peakWindows: zod.array(zod.object({ start: zod.number(), end: zod.number() })).optional(),
     weekend: peakRatesSchema.optional(),
+    customRows: zod.array(zod.object({
+      label: zod.string(),
+      buckets: zod.array(zod.enum(['input', 'cacheRead', 'cacheWrite', 'output'])),
+      perM: zod.number(),
+      peakPerM: zod.number().optional(),
+      offPerM: zod.number().optional(),
+    })).optional(),
   })
   .strict();
 const turnCostSchema = zod
@@ -422,7 +427,7 @@ const accountBalanceSchema = zod
   .object({ currency: zod.string(), totalBalance: zod.number(), updatedAt: zod.number(), source: zod.enum(['api', 'computed']) })
   .strict();
 const billingRowSchema = zod
-  .object({ label: zod.string(), buckets: zod.array(zod.enum(['input', 'cacheRead', 'cacheWrite', 'output'])) })
+  .object({ label: zod.string(), buckets: zod.array(zod.enum(['input', 'cacheRead', 'cacheWrite', 'output'])), perM: zod.number().optional() })
   .strict();
 const usageCostSchema = zod
   .object({
@@ -446,6 +451,7 @@ const usageCostSchema = zod
     usdToCny: zod.number(),
     rateUpdatedAt: zod.number(),
     accountBalance: accountBalanceSchema.nullable(),
+    balanceNeedsKey: zod.boolean(),
     turns: zod.array(turnCostSchema),
     budget: zod.number().nullable(),
     remainingBudget: zod.number().nullable(),
@@ -547,6 +553,7 @@ function emptyUsageCost(state: FoldState): UsageCostValue {
     usdToCny: safeNumber(currentPrices.usdToCny, 7.2),
     rateUpdatedAt: safeNumber(lastRateFetchedAt, 0),
     accountBalance: null,
+    balanceNeedsKey: false,
     turns,
     budget: safeBudget,
     remainingBudget: safeBudget === null ? null : safeBudget,
@@ -797,6 +804,7 @@ const usageCostProjection = {
       usdToCny,
       rateUpdatedAt: lastRateFetchedAt,
       accountBalance,
+      balanceNeedsKey: isDeepSeekProvider(state.provider) && currentBalance === null,
       turns,
       budget,
       remainingBudget: budget === null ? null : safeNumber(budget - estimatedCost, 0),
@@ -857,7 +865,7 @@ class UsageMeterCore {
     return currentBalance;
   }
 
-  maybeRefresh(): void {
+  maybeRefresh(deepSeekWanted: boolean): void {
     const ms = (this.cfg.refreshIntervalMs as number | undefined) ?? 4 * 60 * 60 * 1000;
     const now = Date.now();
     if (rateNeeded && now - this.lastRateRefresh >= ms) {
@@ -865,7 +873,11 @@ class UsageMeterCore {
       void this.refreshRate();
     }
     if (now - currentPrices.updatedAt >= ms) void this.refreshPrices();
-    if (currentBalance === null || now - currentBalance.fetchedAt >= ms) void this.refreshBalance();
+    // Refuse to touch DeepSeek's balance endpoint unless the active session is
+    // actually a DeepSeek provider — the balance is only surfaced for DeepSeek
+    // sessions, so fetching it for e.g. qwen/ollama is pure noise and (with a
+    // non-DeepSeek key) just produces repeated HTTP 401 spam.
+    if (deepSeekWanted && (currentBalance === null || now - currentBalance.fetchedAt >= ms)) void this.refreshBalance();
   }
 
   async refreshRate(): Promise<void> {
@@ -926,15 +938,56 @@ class UsageMeterCore {
 
 /** Plugin entry: provide the service, register settings + the projection. */
 export function apply(ctx: Context, config: Record<string, unknown> = {}): void {
-  const effectiveConfig = { ...config, ...loadPersistedConfig() };
-  const meter = new UsageMeterCore(effectiveConfig);
-  meter.applyConfig(effectiveConfig);
-  // `base` = the file-resolved globals, so the resolution order is
-  // schema-defaults → usage-meter.json globals → settings.yaml `usage-meter`
-  // user section; a user-written section still wins over the file.
-  const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: effectiveConfig });
+  // Seed the per-provider currency / price overrides / ledger maps from the
+  // extra-state file. Global scalars are NOT read here — they resolve through
+  // the `usage-meter` settings namespace below (single canonical write path).
+  loadPersistedConfig();
+  const meter = new UsageMeterCore(config);
+  // Fiber-scoped debounced persistence + process-exit flush. Tearing these down
+  // with `ctx.effect` keeps a plugin reload from leaking debounce timers or a
+  // stale process listener.
+  const persist = {
+    debounce: null as ReturnType<typeof setTimeout> | null,
+    maxWait: null as ReturnType<typeof setTimeout> | null,
+    disposed: false,
+    flush(): void {
+      if (persist.disposed) return;
+      if (persist.debounce === null && persist.maxWait === null) return;
+      if (persist.debounce !== null) { clearTimeout(persist.debounce); persist.debounce = null; }
+      if (persist.maxWait !== null) { clearTimeout(persist.maxWait); persist.maxWait = null; }
+      savePersistedConfig();
+    },
+    schedule(): void {
+      if (persist.disposed) return;
+      if (persist.maxWait === null) persist.maxWait = setTimeout(() => persist.flush(), PERSIST_MAX_WAIT_MS);
+      if (persist.debounce !== null) clearTimeout(persist.debounce);
+      persist.debounce = setTimeout(() => persist.flush(), PERSIST_DEBOUNCE_MS);
+    },
+  };
+  ctx.effect(() => {
+    const onExit = () => persist.flush();
+    process.on('beforeExit', onExit);
+    process.on('exit', onExit);
+    return () => {
+      persist.disposed = true;
+      process.off('beforeExit', onExit);
+      process.off('exit', onExit);
+      if (persist.debounce !== null) { clearTimeout(persist.debounce); persist.debounce = null; }
+      if (persist.maxWait !== null) { clearTimeout(persist.maxWait); persist.maxWait = null; }
+    };
+  });
+  // `base` = the composition entry config only. Global scalars resolve as
+  // schema-defaults → composition `base` → settings.yaml `usage-meter` user
+  // section; a user-written section always wins, and `scope.update` is the one
+  // write path (the popup POST and the settings UI both go through it).
+  const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: config });
   meter.applyConfig(scope.get());
-  scope.watch((next: unknown) => meter.applyConfig(next as Record<string, unknown>));
+  // Watch the canonical namespace: mirror into runtimeConfig and keep the
+  // extra-state file in sync so a settings-page edit survives a restart.
+  scope.watch((next: unknown) => {
+    meter.applyConfig(next as Record<string, unknown>);
+    savePersistedConfig();
+  });
   ctx.sessionProjections.register(usageCostProjection);
 
   // Billing-method templates for the popup dropdown.
@@ -974,18 +1027,29 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         let body = '';
         for await (const chunk of req) body += String(chunk);
         const patch = JSON.parse(body) as Record<string, unknown>;
-        const merged = { ...meter.getConfig() };
-        if (patch.currency !== undefined && typeof patch.currency === 'string' && patch.currency !== '') merged.currency = patch.currency;
-        if (patch.initialBalance !== undefined && typeof patch.initialBalance === 'number' && Number.isFinite(patch.initialBalance)) merged.initialBalance = patch.initialBalance;
-        if (patch.budget !== undefined && typeof patch.budget === 'number' && Number.isFinite(patch.budget)) merged.budget = patch.budget;
-        if (patch.priceSourceUrl !== undefined) merged.priceSourceUrl = patch.priceSourceUrl;
-        if (patch.refreshIntervalMs !== undefined) merged.refreshIntervalMs = patch.refreshIntervalMs;
-        if (patch.deepseekApiKey !== undefined && patch.deepseekApiKey !== '***') merged.deepseekApiKey = patch.deepseekApiKey;
-        meter.applyConfig(merged);
-        // Persist the globals immediately (not just on provider/model paths) so
-        // a settings-page save of currency / initial balance / budget survives a
-        // restart even if no provider or model section touches the file.
-        savePersistedConfig();
+        // GLOBAL scalar settings go through the canonical settings namespace
+        // (single write path; persists to settings.yaml), so the popup and the
+        // settings UI can never diverge. Provider/model overrides + the ledger
+        // are EXTRA state and are persisted by savePersistedConfig() below.
+        const globalPatch: Record<string, unknown> = {};
+        if (patch.currency !== undefined && typeof patch.currency === 'string' && patch.currency !== '') globalPatch.currency = patch.currency;
+        if (patch.initialBalance !== undefined && typeof patch.initialBalance === 'number' && Number.isFinite(patch.initialBalance)) globalPatch.initialBalance = patch.initialBalance;
+        if (patch.budget !== undefined && typeof patch.budget === 'number' && Number.isFinite(patch.budget)) globalPatch.budget = patch.budget;
+        if (patch.priceSourceUrl !== undefined) globalPatch.priceSourceUrl = patch.priceSourceUrl;
+        if (patch.refreshIntervalMs !== undefined) globalPatch.refreshIntervalMs = patch.refreshIntervalMs;
+        if (patch.deepseekApiKey !== undefined && patch.deepseekApiKey !== '***') globalPatch.deepseekApiKey = patch.deepseekApiKey;
+        if (Object.keys(globalPatch).length > 0) {
+          try {
+            await scope.update(globalPatch);
+          } catch (err) {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+            return;
+          }
+          // Mirror the resolved namespace value into the meter immediately; the
+          // async scope.watch also fires and re-applies the same value.
+          meter.applyConfig(scope.get());
+        }
         let currencyChanged = false;
         let ledgerChanged = false;
         let ledgerKey: string | null = null;
@@ -993,6 +1057,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         if (patch.provider !== undefined && patch.provider !== null) {
           const pv = String(patch.provider);
           const pc = providerConfigs[pv] ?? (providerConfigs[pv] = {});
+          // 共享余额开关：开启后该供应商所有模型共用一个钱包（p:<provider>）。
+          if (patch.sharedBalance !== undefined && typeof patch.sharedBalance === 'boolean' && !isDeepSeekProvider(pv)) {
+            pc.sharedBalance = patch.sharedBalance;
+          }
           if (patch.currency !== undefined && patch.currency !== pc.currency) {
             pc.currency = String(patch.currency);
             currencyChanged = true;
@@ -1087,7 +1155,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   currentPrices.updatedAt = Date.now();
   ctx.effect(() => {
     const ms = (meter.getConfig().refreshIntervalMs as number | undefined) ?? 4 * 60 * 60 * 1000;
-    const timer = setInterval(() => meter.maybeRefresh(), ms);
+    const timer = setInterval(() => meter.maybeRefresh(false), ms);
     return () => clearInterval(timer);
   });
 
@@ -1107,7 +1175,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     }
     // rc.7 safe: refresh the in-memory DeepSeek balance on every turn start; the
     // projection `view` reads it directly — nothing is written to the log.
-    if (event.type === 'turn/start') void meter.refreshBalance();
+    if (event.type === 'turn/start' && isDeepSeekProvider(provider)) void meter.refreshBalance();
     if (event.type === 'step/start') {
       stepStartBySession.set(session, { turn: event.data.turn as number, step: event.data.step as number, at: event.time });
     }
@@ -1141,17 +1209,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
               const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
               const costInLedger = toCurrency(deltaCost, pricing.currency ?? 'CNY', ledger.currency, currentPrices.usdToCny);
               ledger.balance = ledger.balance - costInLedger;
-              schedulePersist();
+              persist.schedule();
               broadcastBalance(key, ledger, 'deduct');
             }
           }
         }
       }
     }
-    meter.maybeRefresh();
+    meter.maybeRefresh(isDeepSeekProvider(provider));
   });
 
-  void meter.maybeRefresh();
+  void meter.maybeRefresh(false);
 }
 
 export { BILLING_TYPES, Config, costBreakdown, costOf, usageCostProjection };

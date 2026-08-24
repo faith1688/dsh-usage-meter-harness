@@ -360,7 +360,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
               whiteSpace: 'nowrap',
             }}
           >
-            {accountBalance === null ? '余额 获取中…' : `${balanceNegative ? '透支 ' : '余额 '}${fmtBalance(accountBalance, usage)}`}
+            {accountBalance === null ? (usage.balanceNeedsKey ? '余额 未配置Key' : '余额 获取中…') : `${balanceNegative ? '透支 ' : '余额 '}${fmtBalance(accountBalance, usage)}`}
           </span>
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
@@ -403,7 +403,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
               <span style={{ fontWeight: 800, fontSize: 16, color: balanceKind === 'none' ? t.text3 : balanceNegative ? t.error : t.ok }}>
                 {balanceKind === 'none'
-                  ? isDeepSeek ? '获取中…' : '未配置'
+                  ? isDeepSeek ? (usage.balanceNeedsKey ? '未配置Key' : '获取中…') : '未配置'
                   : accountBalance !== null ? fmtBalance(accountBalance, usage) : '—'}
               </span>
               {accountBalance !== null && accountBalance.updatedAt > 0 && (
@@ -453,7 +453,7 @@ export function UsageReadout({ useProjection }: DockProps): ReactElement | null 
               const primary = r.buckets[0] ?? 'input';
               const tokens = r.buckets.reduce((s, b) => s + bucketTokens(usage, b), 0);
               const cost = r.buckets.reduce((s, b) => s + bucketCost(breakdown, b), 0);
-              const price = bucketPricePerM(p, primary);
+              const price = r.perM ?? bucketPricePerM(p, primary);
               return <BucketRow key={r.label + r.buckets.join(',')} label={r.label} tokens={tokens} price={price} cost={cost} native={native} usage={usage} accent={primary === 'cacheRead' ? t.ok : undefined} />;
             })}
             {usage.reasoningTokens > 0 && (
@@ -529,28 +529,75 @@ function isDeepseekRoute(provider: string): boolean {
 
 const DAY_LABELS: Array<[number, string]> = [[0, '日'], [1, '一'], [2, '二'], [3, '三'], [4, '四'], [5, '五'], [6, '六']];
 
-function fmtClock(minutes: number): string {
-  const m = Math.max(0, Math.min(1439, Math.round(minutes)));
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+/** Numeric cells re-scaled on a currency switch (all price buckets + the
+ *  user balance; the batch `discount` is a multiplier, never converted). */
+const NUM_PRICE_FIELDS = ['input', 'cache', 'cacheWrite', 'output', 'inputPeak', 'inputOff', 'cachePeak', 'cacheOff', 'outPeak', 'outOff', 'balance'] as const;
+
+/** Plain column labels for the template-driven unit-price grid. */
+const FIELD_LABEL: Record<'input' | 'cache' | 'cacheWrite' | 'output', string> = {
+  input: '输入(未命中)', cache: '缓存命中', cacheWrite: '缓存写入', output: '输出',
+};
+
+/** Custom-row bucket types (radio single-select, one row per bucket, max 4). */
+type CustomBucket = 'input' | 'cacheRead' | 'cacheWrite' | 'output';
+const CUSTOM_BUCKETS: readonly CustomBucket[] = ['input', 'cacheRead', 'cacheWrite', 'output'];
+const CUSTOM_BUCKET_LABEL: Record<CustomBucket, string> = { input: '输入', cacheRead: '缓存命中', cacheWrite: '缓存写入', output: '输出' };
+interface CustomRow { bucket: CustomBucket; perM: string; peakPerM: string; offPerM: string; }
+
+/** Which price columns a template's row structure needs — the template drives
+ *  the editor table. 自定义(templateId==='') → all four (the custom editor is
+ *  used instead); unknown/empty → legacy 3 columns. A row billing [input, cacheWrite]
+ *  is priced at input (cache-write falls back to input), so input wins the mapping. */
+function columnsForTemplate(
+  templateId: string,
+  templates: Array<{ id: string; rows?: Array<{ buckets?: Array<'input' | 'cacheRead' | 'cacheWrite' | 'output'> }> }>,
+): Array<'input' | 'cache' | 'cacheWrite' | 'output'> {
+  if (templateId === '') return ['input', 'cache', 'cacheWrite', 'output'];
+  const tpl = templates.find((t) => t.id === templateId);
+  if (!tpl || !tpl.rows || tpl.rows.length === 0) return ['input', 'cache', 'output'];
+  const seen: Array<'input' | 'cache' | 'cacheWrite' | 'output'> = [];
+  for (const row of tpl.rows) {
+    const b = row.buckets ?? [];
+    let f: 'input' | 'cache' | 'cacheWrite' | 'output' | undefined;
+    if (b.includes('input')) f = 'input';
+    else if (b.includes('cacheRead')) f = 'cache';
+    else if (b.includes('cacheWrite')) f = 'cacheWrite';
+    else if (b.includes('output')) f = 'output';
+    if (f !== undefined && !seen.includes(f)) seen.push(f);
+  }
+  return seen.length > 0 ? seen : ['input', 'cache', 'output'];
 }
 
+/** One peak period as four constrained picks: 时(0-23) 分(0-59) — no free text,
+ *  so the user can never enter an unparseable string. */
+interface PeakPeriod { sh: string; sm: string; eh: string; em: string; }
 
+/** Pad a minute pick to two digits (时 keeps 1-2 digits as typed). */
+function padPick(field: string, value: string): string {
+  return field === 'sm' || field === 'em' ? value.padStart(2, '0') : value;
+}
 
-/** "9:00-12:00, 14:00-18:00" → [{start:540,end:720},{start:840,end:1080}] (Beijing minutes). */
-function parsePeakWindowsText(text: string): Array<{ start: number; end: number }> {
+/** "9:00-12:00"-style minutes → editable periods. */
+function windowsToPeriods(wins: Array<{ start: number; end: number }>): PeakPeriod[] {
+  return wins.map((w) => ({
+    sh: String(Math.floor(w.start / 60)),
+    sm: String(w.start % 60).padStart(2, '0'),
+    eh: String(Math.floor(w.end / 60)),
+    em: String(w.end % 60).padStart(2, '0'),
+  }));
+}
+
+/** Editable periods → Beijing-minute windows (invalid/inverted rows dropped). */
+function periodsToWindows(ps: PeakPeriod[]): Array<{ start: number; end: number }> {
   const out: Array<{ start: number; end: number }> = [];
-  for (const part of text.split(/[,，]/)) {
-    const m = /^\s*(\d{1,2}):(\d{2})\s*[-–—~]\s*(\d{1,2}):(\d{2})\s*$/.exec(part.trim());
-    if (!m) continue;
-    const start = Number(m[1]) * 60 + Number(m[2]);
-    const end = Number(m[3]) * 60 + Number(m[4]);
+  for (const p of ps) {
+    const sh = Number(p.sh), sm = Number(p.sm), eh = Number(p.eh), em = Number(p.em);
+    if (![sh, sm, eh, em].every((v) => Number.isInteger(v) && v >= 0)) continue;
+    if (sh > 23 || eh > 23 || sm > 59 || em > 59) continue;
+    const start = sh * 60 + sm, end = eh * 60 + em;
     if (end > start) out.push({ start, end });
   }
   return out;
-}
-
-function formatPeakWindows(wins: Array<{ start: number; end: number }>): string {
-  return wins.map((w) => `${fmtClock(w.start)}-${fmtClock(w.end)}`).join(', ');
 }
 
 type BalancesDoc = Record<string, { balance?: number; currency?: string }>;
@@ -558,19 +605,37 @@ type BalancesDoc = Record<string, { balance?: number; currency?: string }>;
 /** One model's full editable state: flat price row, 峰/谷 grid, 币种, 用户余额,
  *  and 峰谷开关 + 生效星期 + 高峰时段文本. */
 type ModelEditorState = {
-  input: string; cache: string; output: string;
+  input: string; cache: string; cacheWrite: string; output: string;
   inputPeak: string; inputOff: string;
   cachePeak: string; cacheOff: string;
   outPeak: string; outOff: string;
   currency: string;
+  /** The model's PRICING currency — the natural denomination of the stored
+   *  numeric values. Switching `currency` away from it ×rate; back to it → keep
+   *  original (no conversion). */
+  baseCurrency: string;
+  /** Canonical numeric values in `baseCurrency` (input/cache/output/peak/off/balance),
+   *  used to recompute the cells on a currency switch. */
+  base: Record<string, string>;
   balance: string;
   peakOn: boolean;
   days: number[];
-  windowText: string;
+  /** Structured peak periods (时/分 picks); converted to Beijing-minute windows on save. */
+  windows: PeakPeriod[];
   /** Billing-template-driven modes. */
   templateId: string;
   combined: boolean;
   discount: string;
+  /** Custom unit-price rows (R5). Each row = ONE token bucket (radio-selected),
+   *  its display name derived from that bucket, plus a flat per-1M price (and
+   *  峰/谷价 filled in the shared peak section). At most one row per bucket, so
+   *  max 4 rows. Only used when `templateId === ''`（自定义）; the rows are the
+   *  authoritative cost model for the model (host sums `perM` × bucket tokens). */
+  customRows: CustomRow[];
+  /** Canonical custom rows in `baseCurrency` (mirrors `base`), so a currency
+   *  switch away and back restores the original custom-row prices (not just the
+   *  fixed cells). */
+  baseCustomRows: CustomRow[];
   /** True when this is a DeepSeek official model shown pre-filled with known defaults. */
   prefillOfficial?: boolean;
   /** True when this model has no saved price and is not a DeepSeek official model. */
@@ -614,23 +679,45 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
   };
   const flatInput = n(pe?.inputPerM);
   const flatCache = n(pe?.cacheReadPerM);
+  const flatCacheWrite = n(pe?.cacheWritePerM);
   const flatOutput = n(pe?.outputPerM);
   const peak = tier(pe?.peak);
   const off = tier(pe?.offPeak);
   const hasBal = (v: { balance?: number; currency?: string } | undefined) => v !== undefined && typeof v.balance === 'number';
   const bal = hasBal(bals[`m:${provider}/${model}`]) ? bals[`m:${provider}/${model}`] : hasBal(bals[`p:${provider}`]) ? bals[`p:${provider}`] : undefined;
   const savedOverride = ov[key]?.prices !== undefined;
+  // R5: read back user-defined custom unit-price rows (if the model uses them).
+  const rawCustom = Array.isArray((pe as Record<string, unknown> | undefined)?.customRows)
+    ? ((pe as { customRows?: Array<{ label?: unknown; buckets?: unknown; perM?: unknown; peakPerM?: unknown; offPerM?: unknown }> }).customRows ?? [])
+    : undefined;
+  const isCustom = rawCustom !== undefined && rawCustom.length > 0;
+  const customRows = (rawCustom ?? []).map((r) => ({
+    bucket: (Array.isArray(r?.buckets) && (r.buckets[0] === 'cacheRead' || r.buckets[0] === 'cacheWrite' || r.buckets[0] === 'output')) ? r.buckets[0] : 'input',
+    perM: typeof r?.perM === 'number' ? n(r.perM) : '',
+    peakPerM: typeof r?.peakPerM === 'number' ? n(r.peakPerM) : '',
+    offPerM: typeof r?.offPerM === 'number' ? n(r.offPerM) : '',
+  }));
   return {
-    input: flatInput, cache: flatCache, output: flatOutput,
+    input: flatInput, cache: flatCache, cacheWrite: flatCacheWrite, output: flatOutput,
     inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
     cachePeak: peak.cp || flatCache, cacheOff: off.cp || flatCache,
     outPeak: peak.op || flatOutput, outOff: off.op || flatOutput,
     currency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
+    baseCurrency: typeof pe?.currency === 'string' && pe.currency !== '' ? (pe!.currency as string) : 'CNY',
     balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
+    base: {
+      input: flatInput, cache: flatCache, cacheWrite: flatCacheWrite, output: flatOutput,
+      inputPeak: peak.ip || flatInput, inputOff: off.ip || flatInput,
+      cachePeak: peak.cp || flatCache, cacheOff: off.cp || flatCache,
+      outPeak: peak.op || flatOutput, outOff: off.op || flatOutput,
+      balance: bal !== undefined && typeof bal.balance === 'number' ? String(bal.balance) : '',
+    },
     peakOn: pe !== undefined && (pe.peak !== undefined || pe.offPeak !== undefined),
     days: Array.isArray(pe?.peakDays) ? (pe!.peakDays as number[]) : OFFICIAL_DAYS,
-    windowText: formatPeakWindows(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
-    templateId: pe !== undefined ? matchTypeId(pe as unknown as Parameters<typeof matchTypeId>[0]) : '',
+    windows: windowsToPeriods(Array.isArray(pe?.peakWindows) ? (pe!.peakWindows as Array<{ start: number; end: number }>) : OFFICIAL_WINDOWS),
+    templateId: isCustom ? '' : (pe !== undefined ? matchTypeId(pe as unknown as Parameters<typeof matchTypeId>[0]) : ''),
+    customRows,
+    baseCustomRows: customRows,
     combined: pe?.combinedPerM !== undefined,
     discount: typeof pe?.discount === 'number' && (pe!.discount as number) < 1 ? String(pe!.discount as number) : '',
     // whether this is a fresh official model shown with known defaults (→ show
@@ -648,6 +735,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [saveMsg, setSaveMsg] = useState('');
   const [saveOk, setSaveOk] = useState(false);
 
+  // Latest USD→CNY rate seen by a currency switch; the balance poll uses it to
+  // re-convert the ledger value into the editor's current display currency, so a
+  // switch to USD does NOT revert to the raw CNY number a few seconds later.
+  const rateRef = useRef(7.2);
   const [initialBalance, setInitialBalance] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
@@ -662,6 +753,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [saveStates, setSaveStates] = useState<Record<string, ModelSaveState>>({});
   const [savingAll, setSavingAll] = useState(false);
+  // 共享余额：provider id → 该供应商下所有模型是否共用一个余额钱包（默认关）。
+  const [sharedBalances, setSharedBalances] = useState<Record<string, boolean>>({});
   const [templates, setTemplates] = useState<Array<{ id: string; label: string; rows: BillingRow[]; mode: string; peak?: boolean; note?: string }>>([]);
 
   useEffect(() => {
@@ -683,7 +776,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         if (!res.ok) { setLoadError(`加载失败 (${res.status})`); return; }
         const doc = (await res.json()) as {
           config?: Record<string, unknown>;
-          providers?: Record<string, { currency?: string }>;
+          providers?: Record<string, { currency?: string; sharedBalance?: boolean }>;
           priceOverrides?: Record<string, PriceOverrideEntry>;
           balances?: BalancesDoc;
         };
@@ -694,6 +787,9 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         setKeySaved(c.deepseekApiKey === '***');
         setOverrides(doc.priceOverrides ?? {});
         setBalances(doc.balances ?? {});
+        const sb: Record<string, boolean> = {};
+        for (const [pv, pc] of Object.entries(doc.providers ?? {})) if (pc.sharedBalance === true) sb[pv] = true;
+        setSharedBalances(sb);
       } catch (err) {
         if (!cancelled) { console.warn('[usage-meter] load config failed', err); setLoadError('加载失败'); }
       } finally {
@@ -725,6 +821,41 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     return () => { cancelled = true; };
   }, []);
 
+  // R2: live-refresh each model's 用户余额 so the settings page mirrors the
+  // popup's real-time token deduction — without clobbering unsaved price edits
+  // (only the `balance` field is patched, never the price/pref cells).
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/usage-meter/config');
+        if (!res.ok) return;
+        const doc = (await res.json()) as { balances?: BalancesDoc };
+        const bals = doc.balances ?? {};
+        if (cancelled) return;
+        setEdits((prev) => {
+          const next = { ...prev };
+          for (const k of Object.keys(next)) {
+            const provider = k.split('/')[0];
+            const b = bals[`m:${k}`] ?? bals[`p:${provider}`];
+            if (b !== undefined && typeof b.balance === 'number') {
+              const cur = next[k];
+              // Re-convert the ledger value into the editor's CURRENT display
+              // currency, relative to the ledger's OWN currency (a 5s re-poll
+              // must not revert a USD-switched balance, nor double-convert a
+              // ledger that is already in the display currency).
+              const factor = cur !== undefined && typeof b.currency === 'string' && b.currency !== cur.currency ? rateRef.current : 1;
+              next[k] = { ...cur, balance: String(Math.round(b.balance * factor * 1e6) / 1e6) };
+            }
+          }
+          return next;
+        });
+      } catch { /* ignore transient network errors */ }
+    };
+    const id = setInterval(() => void poll(), 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   // 草稿初值：从已存的 override + 余额账本预填（目录/override/余额变化时重置）
   useEffect(() => {
     const d: Record<string, ModelEditorState> = {};
@@ -748,33 +879,67 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       return Number.isFinite(n) && n >= 0 ? n : undefined;
     };
     const prices: Record<string, unknown> = {};
+    // 模板权威计费（底线）：只发送所选模板实际需要的字段。宿主对 override 做
+    // 「托管字段整体替换」，未发送的字段会从内置基价中剥离，因此残留的旧字段
+    // （如从缓存模板切到基础模板后的 cacheReadPerM）绝不会继续参与计价。
     const input = num(e.input);
     const output = num(e.output);
     const cache = num(e.cache);
-    if (input !== undefined) prices.inputPerM = input;
-    if (output !== undefined) prices.outputPerM = output;
-    if (cache !== undefined) prices.cacheReadPerM = cache;
+    const cacheWrite = num(e.cacheWrite);
+    if (e.templateId === '') {
+      // 自定义：customRows 是唯一权威成本模型，不发固定分桶字段。
+    } else {
+      const tplDef = templates.find((tp) => tp.id === e.templateId);
+      // keep 模式（Batch 半价）只改折扣倍率，绝不触碰价格字段——否则托管字段
+      // 替换会把内置基价的缓存价结构剥掉。
+      const cols = tplDef?.mode === 'keep' ? [] : columnsForTemplate(e.templateId, templates);
+      if (cols.includes('input') && input !== undefined) prices.inputPerM = input;
+      if (cols.includes('output') && output !== undefined) prices.outputPerM = output;
+      if (cols.includes('cache') && cache !== undefined) prices.cacheReadPerM = cache;
+      if (cols.includes('cacheWrite') && cacheWrite !== undefined) prices.cacheWritePerM = cacheWrite;
+    }
     if (e.peakOn) {
-      const tier = (ip: string, cp: string, op: string): Record<string, unknown> => {
-        const o: Record<string, unknown> = {};
-        const a = num(ip);
-        if (a !== undefined) o.inputPerM = a;
-        const b = num(cp);
-        if (b !== undefined) o.cacheReadPerM = b;
-        const c = num(op);
-        if (c !== undefined) o.outputPerM = c;
-        return o;
-      };
-      prices.peak = tier(e.inputPeak, e.cachePeak, e.outPeak);
-      prices.offPeak = tier(e.inputOff, e.cacheOff, e.outOff);
       const days = e.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b);
       if (days.length > 0) prices.peakDays = days;
-      const wins = parsePeakWindowsText(e.windowText);
+      const wins = periodsToWindows(e.windows);
       if (wins.length > 0) prices.peakWindows = wins;
+      // 峰/谷价对只属于命名模板的固定格；自定义模型的峰/谷价在各行 customRows
+      // 的 peakPerM/offPerM 里。禁止为自定义模型生成空 peak/offPeak 对象——
+      // 否则 resolvePricingForTime 会把 hasLegacyPeak 误判为真，把 inputPerM
+      // 覆盖成 undefined。
+      if (e.templateId !== '') {
+        const tier = (ip: string, cp: string, op: string): Record<string, unknown> => {
+          const o: Record<string, unknown> = {};
+          const a = num(ip);
+          if (a !== undefined) o.inputPerM = a;
+          const b = num(cp);
+          if (b !== undefined) o.cacheReadPerM = b;
+          const c = num(op);
+          if (c !== undefined) o.outputPerM = c;
+          return o;
+        };
+        const peak = tier(e.inputPeak, e.cachePeak, e.outPeak);
+        const off = tier(e.inputOff, e.cacheOff, e.outOff);
+        if (Object.keys(peak).length > 0) prices.peak = peak;
+        if (Object.keys(off).length > 0) prices.offPeak = off;
+      }
     }
     if (e.combined) {
       const c = num(e.input);
       if (c !== undefined) { prices.combinedPerM = c; prices.inputPerM = c; prices.outputPerM = c; }
+    }
+    // R5 自定义单价项：发送用户定义的行（宿主按行累计计价）。
+    if (e.templateId === '' && e.customRows.length > 0) {
+      const rows = e.customRows
+        .filter((r) => num(r.perM) !== undefined)
+        .map((r) => ({
+          label: CUSTOM_BUCKET_LABEL[r.bucket],
+          buckets: [r.bucket],
+          perM: num(r.perM)!,
+          ...(num(r.peakPerM) !== undefined ? { peakPerM: num(r.peakPerM)! } : {}),
+          ...(num(r.offPerM) !== undefined ? { offPerM: num(r.offPerM)! } : {}),
+        }));
+      if (rows.length > 0) prices.customRows = rows;
     }
     const disc = num(e.discount);
     if (disc !== undefined && disc > 0 && disc < 1) prices.discount = disc;
@@ -783,6 +948,100 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     const bal = num(e.balance);
     if (!isDeepseekRoute(provider) && bal !== undefined) body.balance = bal;
     return body;
+  };
+
+  // R3: switching a model's 币种 rescales the balance + ALL unit-price cells
+  // (peak & off-peak) by the live rate, relative to the model's PRICING
+  // currency. Switch to baseCurrency → restore original (no conversion);
+  // switch away → ×rate on every number. The batch `discount` is untouched
+  // (it is a multiplier, not a money amount).
+  const switchCurrency = async (key: string, newCur: string) => {
+    const cur = edits[key];
+    if (cur === undefined || cur.currency === newCur) return;
+    let rate = 1;
+    if (newCur !== cur.baseCurrency) {
+      try {
+        const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
+        if (r.ok) { const d = (await r.json()) as { usdToCny?: number }; rate = typeof d.usdToCny === 'number' && d.usdToCny > 0 ? d.usdToCny : 1; rateRef.current = rate; }
+      } catch { rate = 1; }
+    }
+    const factor = newCur !== cur.baseCurrency ? rate : 1;
+    const scale = (v: string): string => {
+      const n = Number(v);
+      return v.trim() === '' || Number.isNaN(n) ? '' : String(Math.round(n * factor * 1e6) / 1e6);
+    };
+    setEdits((s) => {
+      const base = s[key];
+      if (base === undefined) return s;
+      const next: ModelEditorState = { ...base, currency: newCur };
+      for (const f of NUM_PRICE_FIELDS) next[f] = scale(base.base[f] ?? '');
+      next.customRows = base.baseCustomRows.map((r) => ({ ...r, perM: scale(r.perM), peakPerM: scale(r.peakPerM), offPerM: scale(r.offPerM) }));
+      return { ...s, [key]: next };
+    });
+  };
+
+  // Edits to a numeric cell. When the model is currently shown in its PRICING
+  // currency, also keep the base snapshot in sync so a later currency switch
+  // (away and back to base) preserves the edit instead of reverting to the old
+  // seeded value.
+  const editNum = (key: string, fld: string, val: string): void => {
+    setEdits((s) => {
+      const cur = s[key];
+      if (cur === undefined) return s;
+      return cur.currency === cur.baseCurrency
+        ? { ...s, [key]: { ...cur, [fld]: val, base: { ...cur.base, [fld]: val } } }
+        : { ...s, [key]: { ...cur, [fld]: val } };
+    });
+  };
+
+  // Custom-row edits: keep the canonical base-currency snapshot in sync when the
+  // model is currently shown in its PRICING currency, so a currency switch away
+  // and back to base restores the user's values (not just the fixed cells).
+  const editCustomRow = (key: string, ri: number, updater: (r: CustomRow) => CustomRow): void => {
+    setEdits((s) => {
+      const cur = s[key];
+      if (cur === undefined) return s;
+      const inBase = cur.currency === cur.baseCurrency;
+      const rows = cur.customRows.map((x, i) => (i === ri ? updater(x) : x));
+      return { ...s, [key]: { ...cur, customRows: rows, baseCustomRows: inBase ? rows : cur.baseCustomRows } };
+    });
+  };
+  const addCustomRow = (key: string): void => {
+    setEdits((s) => {
+      const cur = s[key];
+      if (cur === undefined) return s;
+      // 最多 4 行（每个 bucket 至多一行），已满则不加。
+      if (cur.customRows.length >= CUSTOM_BUCKETS.length) return s;
+      const used = new Set<CustomBucket>(cur.customRows.map((r) => r.bucket));
+      const bucket = CUSTOM_BUCKETS.find((b) => !used.has(b)) ?? 'input';
+      const inBase = cur.currency === cur.baseCurrency;
+      const row: CustomRow = { bucket, perM: '', peakPerM: '', offPerM: '' };
+      return { ...s, [key]: { ...cur, customRows: [...cur.customRows, row], baseCustomRows: inBase ? [...cur.baseCustomRows, row] : cur.baseCustomRows } };
+    });
+  };
+  const delCustomRow = (key: string, ri: number): void => {
+    setEdits((s) => {
+      const cur = s[key];
+      if (cur === undefined) return s;
+      const inBase = cur.currency === cur.baseCurrency;
+      return { ...s, [key]: { ...cur, customRows: cur.customRows.filter((_, i) => i !== ri), baseCustomRows: inBase ? cur.baseCustomRows.filter((_, i) => i !== ri) : cur.baseCustomRows } };
+    });
+  };
+
+  // 共享余额开关：乐观更新 + POST 持久化（宿主把该供应商的账本键统一切到
+  // p:<provider>，所有模型扣同一个钱包）。
+  const toggleSharedBalance = async (provider: string, on: boolean): Promise<void> => {
+    setSharedBalances((s) => ({ ...s, [provider]: on }));
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, sharedBalance: on }),
+      });
+      if (!res.ok) setSharedBalances((s) => ({ ...s, [provider]: !on }));
+    } catch {
+      setSharedBalances((s) => ({ ...s, [provider]: !on }));
+    }
   };
 
   const persistModel = async (provider: string, model: string, body: Record<string, unknown>): Promise<boolean> => {
@@ -880,7 +1139,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
       patch.provider = '*';
       const res = await fetch('/api/usage-meter/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
       if (res.ok) {
-        setSaveOk(true); setSaveMsg('已保存'); setKeySaved(apiKey.trim() !== '' ? true : keySaved);
+        setSaveOk(true); setSaveMsg('已保存');
+        // API key 只在保存后“消失”（置为已保存芯片 / 清空输入，只作掩码显示）；
+        // 非 DeepSeek 初始余额则保留输入框，作为后续新增模型的默认起始余额。
+        if (apiKey.trim() !== '' && apiKey !== '***') { setKeySaved(true); setApiKey(''); }
       } else { setSaveOk(false); setSaveMsg(`保存失败 (${res.status})`); }
     } catch (err) {
       console.warn('[usage-meter] save config failed', err);
@@ -980,6 +1242,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                       <option key={p.provider} value={p.provider}>{p.label}</option>
                     ))}
                   </select>
+                  {!isDeepseekRoute(selProvider) && selProvider !== '' && (
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', marginLeft: 8 }}>
+                      <input type="checkbox" checked={sharedBalances[selProvider] === true}
+                        onChange={(ev) => void toggleSharedBalance(selProvider, ev.target.checked)}
+                        style={{ accentColor: t.accent }} />
+                      <span style={{ fontSize: 11, color: t.text2 }}>共享余额（该供应商所有模型共用一个余额）</span>
+                    </label>
+                  )}
                 </div>
                 {(() => {
                   const active = modelDir.find((p) => p.provider === selProvider);
@@ -1020,7 +1290,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
                                   <label style={field} htmlFor={`um-cur-${k}`}>
                                     <span style={{ fontSize: 12, color: t.text2 }}>币种</span>
-                                    <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, currency: ev.target.value } }))}
+                                    <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
                                       style={{ ...select, maxWidth: 100, fontSize: 12, padding: '3px 6px' }}>
                                       <option value="CNY">CNY (¥)</option>
                                       <option value="USD">USD ($)</option>
@@ -1030,7 +1300,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     <label style={field} htmlFor={`um-bal-${k}`}>
                                       <span style={{ fontSize: 12, color: t.text2 }}>用户余额</span>
                                       <input id={`um-bal-${k}`} value={e.balance}
-                                        onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, balance: ev.target.value } }))}
+                                        onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                         placeholder="如 100"
                                         style={{ ...input, maxWidth: 140, fontSize: 12, padding: '3px 6px' }} />
                                     </label>
@@ -1042,11 +1312,17 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     <select id={`um-tpl-${k}`} value={e.templateId}
                                       onChange={(ev) => {
                                         const tpl = templates.find((tp) => tp.id === ev.target.value);
+                                        const v = ev.target.value;
                                         setEdits((s) => ({ ...s, [k]: { ...e,
-                                          templateId: ev.target.value,
+                                          templateId: v,
                                           combined: tpl?.mode === 'combined',
                                           discount: tpl?.mode === 'keep' ? '0.5' : '',
                                           peakOn: tpl?.peak === true,
+                                          // 自定义：给一组默认单价项（输入/输出），用户可增删。
+                                          // 选命名模板：清空 customRows（宿主以模板/固定格计价）。
+                                          customRows: v === ''
+                                            ? (e.customRows.length > 0 ? e.customRows : [{ bucket: 'input', perM: '', peakPerM: '', offPerM: '' }, { bucket: 'output', perM: '', peakPerM: '', offPerM: '' }])
+                                            : [],
                                         } }));
                                       }}
                                       style={{ ...select, maxWidth: 240, fontSize: 12, padding: '3px 6px' }}>
@@ -1064,37 +1340,99 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                       placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
                                   </label>
                                 )}
-                                <div>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>基础单价（元/M 或 $/M）</div>
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
-                                    <span style={{ fontSize: 10, color: t.text3 }} />
-                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输入(未命中)</span>
-                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>缓存命中</span>
-                                    <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输出</span>
-                                    <span style={{ fontSize: 11, color: t.text2 }}>单价</span>
-                                    {(['input', 'cache', 'output'] as const).map((fld) => {
-                                      const key = `um-${fld}-${k}`;
-                                      const val = e[fld];
+                                {/* R5 自定义单价项：templateId==='' 时用可增删的行；命名模板用下方固定格+峰谷。 */}
+                                {e.templateId === '' && (
+                                  <div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>自定义单价项（每行 = 单价 × 该行 token 数；峰/谷价在下方「启用峰谷计费」里统一填）</div>
+                                    {e.customRows.map((r, ri) => {
+                                      const usedElsewhere = new Set<CustomBucket>(e.customRows.map((x) => x.bucket));
+                                      usedElsewhere.delete(r.bucket);
                                       return (
-                                        <input key={key} id={key} value={val}
-                                          onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
-                                          placeholder="元/M" style={cell} />
+                                        <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' as const }}>
+                                          {CUSTOM_BUCKETS.map((b) => {
+                                            const disabled = usedElsewhere.has(b);
+                                            return (
+                                              <label key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: disabled ? 'not-allowed' as const : 'pointer' as const, fontSize: 11, color: disabled ? t.text3 : t.text }}>
+                                                <input type="radio" name={`um-cb-${k}`} checked={r.bucket === b}
+                                                  disabled={disabled}
+                                                  onChange={() => editCustomRow(k, ri, (x) => ({ ...x, bucket: b }))}
+                                                  style={{ accentColor: t.accent }} />
+                                                {CUSTOM_BUCKET_LABEL[b]}
+                                              </label>
+                                            );
+                                          })}
+                                          <span style={{ fontSize: 11, color: t.text2, minWidth: 56 }}>＝ {CUSTOM_BUCKET_LABEL[r.bucket]}</span>
+                                          <input value={r.perM} placeholder="元/M"
+                                            onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, perM: ev.target.value }))}
+                                            style={{ ...input, maxWidth: 80, fontSize: 12, padding: '3px 6px' }} />
+                                          <button type="button"
+                                            onClick={() => delCustomRow(k, ri)}
+                                            style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>删</button>
+                                        </div>
                                       );
                                     })}
+                                    {e.customRows.length < CUSTOM_BUCKETS.length && (
+                                      <button type="button"
+                                        onClick={() => addCustomRow(k)}
+                                        style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>+ 添加单价项（最多 4 项）</button>
+                                    )}
                                   </div>
+                                )}
+                                {e.templateId !== '' && (
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: t.text2, marginBottom: 4 }}>基础单价（元/M 或 $/M）</div>
+                                  {(() => {
+                                    const gridFields = columnsForTemplate(e.templateId, templates);
+                                    return (
+                                      <div style={{ display: 'grid', gridTemplateColumns: `auto ${gridFields.map(() => '1fr').join(' ')}`, gap: '2px 8px', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 10, color: t.text3 }} />
+                                        {gridFields.map((f) => <span key={f} style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>{FIELD_LABEL[f]}</span>)}
+                                        <span style={{ fontSize: 11, color: t.text2 }}>单价</span>
+                                        {gridFields.map((f) => (
+                                          <input key={f} id={`um-${f}-${k}`} value={e[f]}
+                                            onChange={(ev) => editNum(k, f, ev.target.value)}
+                                            placeholder="元/M" style={cell} />
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
+                                )}
                                 <div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' as const }}>
-                                      <input type="checkbox" checked={e.peakOn}
-                                        onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, peakOn: ev.target.checked } }))}
-                                        style={{ accentColor: t.accent }} />
-                                      <span style={{ fontSize: 12, color: t.text2 }}>启用峰谷计费</span>
-                                    </label>
-                                    <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; 未勾选星期 = 谷价</span>
+                                    {/* 峰谷计费只在需要时出现：官方 DeepSeek 恒有；选中峰谷模板时出现；自定义
+                                        （未选模板）也允许用户自行开启；已开启则保持显示。 */}
+                                    {(deep || e.templateId === 'peak-off-peak' || e.templateId === '' || e.peakOn) && (
+                                      <>
+                                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' as const }}>
+                                          <input type="checkbox" checked={e.peakOn}
+                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, peakOn: ev.target.checked } }))}
+                                            style={{ accentColor: t.accent }} />
+                                          <span style={{ fontSize: 12, color: t.text2 }}>启用峰谷计费</span>
+                                        </label>
+                                        <span style={{ fontSize: 10, color: t.text3 }}>峰: 高; 谷: 低; 未勾选星期 = 谷价</span>
+                                      </>
+                                    )}
                                   </div>
                                   {e.peakOn && (
                                     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6, padding: '6px 8px', background: 'rgba(139,148,158,0.06)', borderRadius: 4 }}>
+                                      {e.templateId === '' ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+                                          {e.customRows.map((r, ri) => (
+                                            <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                              <span style={{ fontSize: 11, color: t.text2, width: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{CUSTOM_BUCKET_LABEL[r.bucket]}</span>
+                                              <span style={{ fontSize: 10, color: t.text3 }}>峰价</span>
+                                              <input value={r.peakPerM} placeholder="元/M"
+                                                onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, peakPerM: ev.target.value }))}
+                                                style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
+                                              <span style={{ fontSize: 10, color: t.text3 }}>谷价</span>
+                                              <input value={r.offPerM} placeholder="元/M"
+                                                onChange={(ev) => editCustomRow(k, ri, (x) => ({ ...x, offPerM: ev.target.value }))}
+                                                style={{ ...input, maxWidth: 90, fontSize: 12, padding: '3px 6px' }} />
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
                                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr', gap: '2px 8px', alignItems: 'center' }}>
                                         <span style={{ fontSize: 10, color: t.text3 }} />
                                         <span style={{ fontSize: 10, color: t.text3, textAlign: 'right' as const }}>输入(未命中)</span>
@@ -1104,17 +1442,18 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                         {(['inputPeak', 'cachePeak', 'outPeak'] as const).map((fld) => {
                                           const key = `um-${fld}-${k}`;
                                           return <input key={key} id={key} value={e[fld]}
-                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
+                                            onChange={(ev) => editNum(k, fld, ev.target.value)}
                                             placeholder="元/M" style={cell} />;
                                         })}
                                         <span style={{ fontSize: 11, color: t.text2 }}>谷价</span>
                                         {(['inputOff', 'cacheOff', 'outOff'] as const).map((fld) => {
                                           const key = `um-${fld}-${k}`;
                                           return <input key={key} id={key} value={e[fld]}
-                                            onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, [fld]: ev.target.value } }))}
+                                            onChange={(ev) => editNum(k, fld, ev.target.value)}
                                             placeholder="元/M" style={cell} />;
                                         })}
                                       </div>
+                                      )}
                                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
                                         <span style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }}>峰谷星期:</span>
                                         {DAY_LABELS.map(([d, lbl]) => (
@@ -1130,12 +1469,41 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                           </label>
                                         ))}
                                       </div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <label style={{ fontSize: 11, color: t.text2, whiteSpace: 'nowrap' }} htmlFor={`um-hr-${k}`}>高峰时段(HH:MM-HH:MM):</label>
-                                        <input id={`um-hr-${k}`} value={e.windowText}
-                                          onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windowText: ev.target.value } }))}
-                                          placeholder="9:00-12:00, 14:00-18:00"
-                                          style={{ ...input, maxWidth: 260, fontSize: 12, padding: '3px 6px' }} />
+                                      <div>
+                                        <div style={{ fontSize: 11, color: t.text2, marginBottom: 3 }}>高峰时段（北京时间）:</div>
+                                        {e.windows.map((p, pi) => (
+                                          <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, flexWrap: 'wrap' as const }}>
+                                            <span style={{ fontSize: 11, color: t.text3 }}>{pi + 1}.</span>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>起</span>
+                                            {([['sh', 23], ['sm', 59]] as const).map(([f, max]) => (
+                                              <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
+                                                onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
+                                                style={{ padding: '2px 4px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+                                                {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => (
+                                                  <option key={v} value={v}>{v}</option>
+                                                ))}
+                                              </select>
+                                            ))}
+                                            <span style={{ fontSize: 10, color: t.text3 }}>时</span>
+                                            <span style={{ fontSize: 10, color: t.text3 }}>止</span>
+                                            {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
+                                              <select key={f} value={p[f]} aria-label={`${f}-${pi}`}
+                                                onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)) } }))}
+                                                style={{ padding: '2px 4px', border: `1px solid ${t.border}`, borderRadius: 5, background: t.card, color: t.text, fontSize: 12 }}>
+                                                {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => (
+                                                  <option key={v} value={v}>{v}</option>
+                                                ))}
+                                              </select>
+                                            ))}
+                                            <button type="button"
+                                              onClick={() => setEdits((s) => ({ ...s, [k]: { ...e, windows: e.windows.filter((_, xi) => xi !== pi) } }))}
+                                              disabled={e.windows.length <= 1}
+                                              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: `1px solid ${t.borderSoft}`, background: 'transparent', color: t.text2, cursor: 'pointer' }}>删</button>
+                                          </div>
+                                        ))}
+                                        <button type="button"
+                                          onClick={() => setEdits((s) => ({ ...s, [k]: { ...e, windows: [...e.windows, { sh: '9', sm: '00', eh: '12', em: '00' }] } }))}
+                                          style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>+ 添加时段</button>
                                       </div>
                                     </div>
                                   )}
@@ -1360,7 +1728,7 @@ function PriceEditor({
   // Peak/off-peak schedule: which Beijing weekdays split + the peak-hour windows (minutes).
   const [peakDays, setPeakDays] = useState<number[]>(() => base?.peakDays ?? [1, 2, 3, 4, 5]);
   const [peakWindows, setPeakWindows] = useState<Array<{ start: number; end: number }>>(() => base?.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }]);
-  const [windowText, setWindowText] = useState(() => (base?.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }]).map((w) => `${Math.floor(w.start / 60)}:${String(w.start % 60).padStart(2, '0')}-${Math.floor(w.end / 60)}:${String(w.end % 60).padStart(2, '0')}`).join(', '));
+  const [windows, setWindows] = useState<PeakPeriod[]>(() => windowsToPeriods(base?.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }]));
   const sym = currency === 'USD' ? '$' : '¥';
 
   useEffect(() => {
@@ -1464,10 +1832,7 @@ function PriceEditor({
         pricePatch.peak = peak as unknown as number;
         pricePatch.offPeak = offPeak as unknown as number;
         pricePatch.peakDays = [...peakDays] as unknown as number;
-        pricePatch.peakWindows = windowText.split(',').map((s) => {
-          const m = /^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/.exec(s);
-          return m ? { start: Number(m[1]) * 60 + Number(m[2]), end: Number(m[3]) * 60 + Number(m[4]) } : null;
-        }).filter((x): x is { start: number; end: number } => x !== null) as unknown as number;
+        pricePatch.peakWindows = periodsToWindows(windows) as unknown as number;
       }
     }
     pricePatch.currency = currency as unknown as number;
@@ -1580,13 +1945,29 @@ function PriceEditor({
               </label>
             ))}
           </div>
-          <div style={{ marginBottom: 2 }}>高峰时段（北京时间，格式如 9:00-12:00, 14:00-18:00）</div>
-          <input
-            value={windowText}
-            onChange={(e) => setWindowText(e.target.value)}
-            placeholder="如 9:00-12:00, 14:00-18:00"
-            style={{ width: 220, fontSize: 12, padding: '1px 4px' }}
-          />
+          <div style={{ marginBottom: 2 }}>高峰时段（北京时间）</div>
+          {windows.map((p, pi) => (
+            <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+              <span style={{ fontSize: 10, color: t.text3 }}>{pi + 1}. 起</span>
+              {([['sh', 23], ['sm', 59]] as const).map(([f, max]) => (
+                <select key={f} value={p[f]} onChange={(ev) => setWindows((ws) => ws.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)))}
+                  style={{ fontSize: 12, padding: '1px 3px' }}>
+                  {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              ))}
+              <span style={{ fontSize: 10, color: t.text3 }}>止</span>
+              {([['eh', 23], ['em', 59]] as const).map(([f, max]) => (
+                <select key={f} value={p[f]} onChange={(ev) => setWindows((ws) => ws.map((x, xi) => (xi === pi ? { ...x, [f]: ev.target.value } : x)))}
+                  style={{ fontSize: 12, padding: '1px 3px' }}>
+                  {Array.from({ length: max + 1 }, (_, v) => padPick(f, String(v))).map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              ))}
+              <button type="button" onClick={() => setWindows((ws) => ws.filter((_, xi) => xi !== pi))} disabled={windows.length <= 1}
+                style={{ fontSize: 11, padding: '1px 6px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text2, cursor: 'pointer' }}>删</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setWindows((ws) => [...ws, { sh: '9', sm: '00', eh: '12', em: '00' }])}
+            style={{ fontSize: 11, padding: '1px 8px', borderRadius: 5, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', marginBottom: 4 }}>+ 添加时段</button>
         </div>
       )}
 

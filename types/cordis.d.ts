@@ -12,6 +12,7 @@
 export interface SettingsScope {
   get(): Record<string, unknown>;
   watch(cb: (value: unknown) => void): void;
+  update(patch: Record<string, unknown>): Promise<void>;
 }
 
 export interface Context {

@@ -42,11 +42,33 @@ export interface ModelPricing {
     updatedAt?: number;
     /** Where the price came from (`bundled` / `remote` / `user`). */
     source?: 'bundled' | 'remote' | 'user';
+    /**
+     * Custom user-defined unit-price rows (R5). When present and non-empty it is
+     * the authoritative cost model: the whole cost = Σ per row `perM` × (tokens
+     * of the buckets in that row). Rows bill at a FLAT rate per row (`perM`);
+     * the peak/off-peak split is only applied by the legacy bucket path (v1).
+     */
+    customRows?: ModelPricingRow[];
+}
+/** One user-defined unit-price row (R5): a label + which token buckets it bills
+ *  + the per-1M-token price for the SUM of those buckets. */
+export interface ModelPricingRow {
+    label: string;
+    buckets: Array<'input' | 'cacheRead' | 'cacheWrite' | 'output'>;
+    perM: number;
+    /** Peak-window per-1M rate (overrides `perM` inside the peak window). */
+    peakPerM?: number;
+    /** Off-peak per-1M rate (defaults to `perM` when absent). */
+    offPerM?: number;
 }
 /** One row of the per-model 用量 template: a label + which token buckets it sums. */
 export interface BillingRow {
     label: string;
     buckets: Array<'input' | 'cacheRead' | 'cacheWrite' | 'output'>;
+    /** Per-1M unit price carried by CUSTOM rows (R5); the readout uses it so a
+     *  custom-row model shows its real unit price instead of a 0 from the legacy
+     *  bucket fields. Present only on rows derived from `customRows`. */
+    perM?: number;
 }
 /** Per-bucket cost breakdown of one usage sample (each in the pricing currency). */
 export interface CostBreakdown {
@@ -127,6 +149,9 @@ export interface UsageCostValue {
     rateUpdatedAt: number;
     /** Live account balance (DeepSeek API or funded ledger); null while unavailable. */
     accountBalance: AccountBalance | null;
+    /** True when a DeepSeek balance SHOULD be shown but no value was fetched
+     *  (the DeepSeek API key is missing/invalid, or the fetch failed). */
+    balanceNeedsKey: boolean;
     /** Per-turn cost ledger (most recent last). */
     turns: TurnCost[];
     /** User-configured budget in `currency`; null = no budget set. */

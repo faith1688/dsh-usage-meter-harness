@@ -198,6 +198,18 @@ declare const usageCostProjection: {
                     outputPerM: zod.ZodNumber;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
+                customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                    label: zod.ZodString;
+                    buckets: zod.ZodArray<zod.ZodEnum<{
+                        input: "input";
+                        cacheRead: "cacheRead";
+                        cacheWrite: "cacheWrite";
+                        output: "output";
+                    }>>;
+                    perM: zod.ZodNumber;
+                    peakPerM: zod.ZodOptional<zod.ZodNumber>;
+                    offPerM: zod.ZodOptional<zod.ZodNumber>;
+                }, zod.core.$strip>>>;
             }, zod.core.$strict>>;
             basePricing: zod.ZodNullable<zod.ZodObject<{
                 inputPerM: zod.ZodNumber;
@@ -234,6 +246,18 @@ declare const usageCostProjection: {
                     outputPerM: zod.ZodNumber;
                     cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
+                customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                    label: zod.ZodString;
+                    buckets: zod.ZodArray<zod.ZodEnum<{
+                        input: "input";
+                        cacheRead: "cacheRead";
+                        cacheWrite: "cacheWrite";
+                        output: "output";
+                    }>>;
+                    perM: zod.ZodNumber;
+                    peakPerM: zod.ZodOptional<zod.ZodNumber>;
+                    offPerM: zod.ZodOptional<zod.ZodNumber>;
+                }, zod.core.$strip>>>;
             }, zod.core.$strict>>;
             priceRows: zod.ZodArray<zod.ZodObject<{
                 label: zod.ZodString;
@@ -243,6 +267,7 @@ declare const usageCostProjection: {
                     cacheWrite: "cacheWrite";
                     output: "output";
                 }>>;
+                perM: zod.ZodOptional<zod.ZodNumber>;
             }, zod.core.$strict>>;
             officialPrice: zod.ZodNullable<zod.ZodObject<{
                 pricing: zod.ZodObject<{
@@ -280,6 +305,18 @@ declare const usageCostProjection: {
                         outputPerM: zod.ZodNumber;
                         cacheReadPerM: zod.ZodOptional<zod.ZodNumber>;
                     }, zod.core.$strict>>;
+                    customRows: zod.ZodOptional<zod.ZodArray<zod.ZodObject<{
+                        label: zod.ZodString;
+                        buckets: zod.ZodArray<zod.ZodEnum<{
+                            input: "input";
+                            cacheRead: "cacheRead";
+                            cacheWrite: "cacheWrite";
+                            output: "output";
+                        }>>;
+                        perM: zod.ZodNumber;
+                        peakPerM: zod.ZodOptional<zod.ZodNumber>;
+                        offPerM: zod.ZodOptional<zod.ZodNumber>;
+                    }, zod.core.$strip>>>;
                 }, zod.core.$strict>;
                 rows: zod.ZodArray<zod.ZodObject<{
                     label: zod.ZodString;
@@ -289,6 +326,7 @@ declare const usageCostProjection: {
                         cacheWrite: "cacheWrite";
                         output: "output";
                     }>>;
+                    perM: zod.ZodOptional<zod.ZodNumber>;
                 }, zod.core.$strict>>;
             }, zod.core.$strip>>;
             estimatedCost: zod.ZodNumber;
@@ -304,6 +342,7 @@ declare const usageCostProjection: {
                     computed: "computed";
                 }>;
             }, zod.core.$strict>>;
+            balanceNeedsKey: zod.ZodBoolean;
             turns: zod.ZodArray<zod.ZodObject<{
                 turn: zod.ZodNumber;
                 cost: zod.ZodNumber;

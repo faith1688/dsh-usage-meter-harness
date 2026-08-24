@@ -72,27 +72,10 @@ export const BILLING_TYPES: BillingType[] = [
     mode: 'split',
     note: '首次写入约 1.25×输入价、命中约 0.1×输入价（Anthropic 1h 写入为 2×）。',
   },
-  {
-    id: 'cache-storage',
-    label: '上下文缓存存储 ⚠️存储费无法计量',
-    rows: [
-      { label: '输入（缓存命中）', buckets: ['cacheRead'] },
-      { label: '输入（缓存未命中）', buckets: ['input'] },
-      { label: '输出', buckets: ['output'] },
-    ],
-    mode: 'split',
-    note: '⚠️ 存储费（存储量×小时）无法自动计量，仅计缓存读价；缓存输入与输出正常计价。',
-  },
-  {
-    id: 'tiered',
-    label: '上下文长度分档 ⚠️取基础档',
-    rows: [
-      { label: '输入', buckets: ['input', 'cacheWrite'] },
-      { label: '输出', buckets: ['output'] },
-    ],
-    mode: 'split',
-    note: '⚠️ 取基础档（≤200K 或 ≤32K）；更高档暂按基础档计。',
-  },
+  // 「上下文缓存存储」与「上下文长度分档」两模板已移除：
+  //  - 存储费=缓存量×存储时长，存储时长只在厂商服务端（TokenUsage 无此数据），无法计量；
+  //    去掉存储费后它与「缓存命中/未命中」完全重复。
+  //  - 分档需要每模型档位边界+各档价目（内置/LiteLLM 源均不含），恒按基础档会静默少算。
   {
     id: 'combined',
     label: '输入+输出合并',
@@ -114,6 +97,10 @@ export const BILLING_TYPES: BillingType[] = [
 
 /** Derive the default 用量 template from one pricing row (shared by effective + official). */
 export function rowsFromPricing(base: ModelPricing): BillingRow[] {
+  // CUSTOM rows (R5): the row template is exactly the user-defined rows.
+  if (base.customRows !== undefined && base.customRows.length > 0) {
+    return base.customRows.map((r) => ({ label: r.label, buckets: r.buckets, perM: r.perM }));
+  }
   // COMBINED billing (讯飞/百川): one row covering ALL tokens at one rate.
   if (base.combinedPerM !== undefined) {
     return [{ label: '输入+输出（合并计价）', buckets: ['input', 'cacheRead', 'cacheWrite', 'output'] }];

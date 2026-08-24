@@ -44,7 +44,9 @@ export function isPeakHour(utcHour: number): boolean {
  * NOT in `peakDays` (e.g. Sat/Sun) is billed flat with `weekend ?? offPeak`.
  */
 export function resolvePricingForTime(pricing: ModelPricing, now: number): ModelPricing {
-  if (pricing.peak === undefined || pricing.offPeak === undefined) return pricing;
+  const hasLegacyPeak = pricing.peak !== undefined && pricing.offPeak !== undefined;
+  const hasRowPeak = (pricing.customRows ?? []).some((r) => r.peakPerM !== undefined || r.offPerM !== undefined);
+  if (!hasLegacyPeak && !hasRowPeak) return pricing;
   if (pricing.peakOffPeakFrom !== undefined && now < pricing.peakOffPeakFrom) return pricing;
   const beijing = new Date(now + 8 * 3600 * 1000);
   const bjDay = beijing.getUTCDay();
@@ -52,17 +54,30 @@ export function resolvePricingForTime(pricing: ModelPricing, now: number): Model
   const days = pricing.peakDays ?? [0, 1, 2, 3, 4, 5, 6];
   // Windows are in Beijing MINUTES since midnight (e.g. 9:00-12:00 = [540,720) ).
   const windows = pricing.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }];
-  const active = days.includes(bjDay)
-    ? windows.some((w) => bjMin >= w.start && bjMin < w.end)
-      ? pricing.peak
-      : pricing.offPeak
-    : (pricing.weekend ?? pricing.offPeak);
-  return {
-    ...pricing,
-    inputPerM: active.inputPerM,
-    outputPerM: active.outputPerM,
-    ...(active.cacheReadPerM !== undefined ? { cacheReadPerM: active.cacheReadPerM } : {}),
-  };
+  const inPeak = days.includes(bjDay) && windows.some((w) => bjMin >= w.start && bjMin < w.end);
+  let out = pricing;
+  if (hasLegacyPeak) {
+    const active = inPeak ? pricing.peak! : (days.includes(bjDay) ? pricing.offPeak! : (pricing.weekend ?? pricing.offPeak!));
+    out = {
+      ...out,
+      inputPerM: active.inputPerM,
+      outputPerM: active.outputPerM,
+      ...(active.cacheReadPerM !== undefined ? { cacheReadPerM: active.cacheReadPerM } : {}),
+    };
+  }
+  // Custom rows: resolve each row's effective per-1M rate for this instant
+  // (peak window → peakPerM/perM; otherwise → offPerM/perM; days not in
+  // `peakDays` are off-peak, i.e. "未勾选星期 = 谷价").
+  if (hasRowPeak && pricing.customRows !== undefined && pricing.customRows.length > 0) {
+    out = {
+      ...out,
+      customRows: pricing.customRows.map((r) => ({
+        ...r,
+        perM: inPeak ? (r.peakPerM ?? r.perM) : (r.offPerM ?? r.perM),
+      })),
+    };
+  }
+  return out;
 }
 
 /**
