@@ -64,14 +64,31 @@ After any method: **restart `dsh web`**.
 
 ## Updating
 
-Upgrading is **re-running the same install command** — every method is idempotent:
+Two cases — pick the right one:
 
-- Official (needs pnpm): `dsh plugin --profile web add @faith1688/dsh-usage-meter-harness`
-  (you may also use `dsh plugin --profile web update @faith1688/dsh-usage-meter-harness`;
-  `add` resolves the latest version and refreshes the dependency range).
-- No pnpm: `npx -y @faith1688/dsh-usage-meter-harness`
+**Fresh install (never had the plugin), or the `npx` method:** just run the
+install command; it always fetches the latest release.
 
-After the command: **restart `dsh web`** (or reload the browser page).
+**Upgrading an existing install (plugin already present):** the profile's
+`package.json` / `pnpm-lock.yaml` may be pinned to an old version, and a bare
+`add` can be skipped by pnpm as "already satisfied". **Always ask for the new
+version explicitly:**
+
+```bash
+dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
+```
+
+or, from inside the profile directory (`~/.dsh/profiles/web`):
+
+```bash
+pnpm update @faith1688/dsh-usage-meter-harness
+```
+
+(You may also pin an exact version, e.g. `...@1.0.28`.)
+
+After updating: **restart `dsh web`** (or reload the browser page). Note that
+restarting alone never fetches a new version — it only reloads what is already
+in `node_modules`.
 
 **Why this never duplicates the mount entry and never touches your config:**
 

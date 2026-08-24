@@ -63,14 +63,28 @@ curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/m
 
 ## 更新
 
-更新就是**重跑同一条安装命令**——所有方式都是幂等的：
+分两种情况——请对号入座：
 
-- 官方（需要 pnpm）：`dsh plugin --profile web add @faith1688/dsh-usage-meter-harness`
-  （也可以用 `dsh plugin --profile web update @faith1688/dsh-usage-meter-harness`；
-  `add` 会解析最新版本并刷新依赖范围）。
-- 不需要 pnpm：`npx -y @faith1688/dsh-usage-meter-harness`
+**全新安装（从没装过），或使用 npx 方式：** 直接跑安装命令即可，永远拉取最新版。
 
-执行后：**重启 `dsh web`**（或刷新浏览器页面）。
+**升级已有安装（插件已存在）：** profile 的 `package.json` / `pnpm-lock.yaml`
+可能锁在旧版本，不带版本号的 `add` 会被 pnpm 判定"已满足"而跳过。**升级时
+务必显式指定新版本：**
+
+```bash
+dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
+```
+
+或在 profile 目录（`~/.dsh/profiles/web`）里执行：
+
+```bash
+pnpm update @faith1688/dsh-usage-meter-harness
+```
+
+（也可以指定精确版本，如 `...@1.0.28`。）
+
+更新后：**重启 `dsh web`**（或刷新浏览器页面）。注意：**重启本身不会拉取
+新版本**——它只是重新加载 `node_modules` 里已有的包。
 
 **为什么这样更新绝不会产生重复挂载记录、也绝不会动你的配置：**
 
