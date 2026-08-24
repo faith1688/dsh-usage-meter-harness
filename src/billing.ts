@@ -50,7 +50,7 @@ export const BILLING_TYPES: BillingType[] = [
   },
   {
     id: 'peak-off-peak',
-    label: '峰谷分时定价 ⚠️DeepSeek',
+    label: '峰谷分时定价（DeepSeek）',
     rows: [
       { label: '输入（缓存命中）', buckets: ['cacheRead'] },
       { label: '输入（缓存未命中）', buckets: ['input'] },
