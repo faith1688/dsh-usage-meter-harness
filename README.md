@@ -57,7 +57,34 @@ The script does everything for you: `cd` into the DSH web profile, installs the
 package with visible progress, and registers the bundle in `dsh.profile.bundles`
 (idempotent — safe to re-run after upgrades).
 
+> Note: Method 3 uses plain `npm` and does **not** do pnpm coordination. If your
+> profile is managed with pnpm (the default for `dsh plugin`), prefer Method 1.
+
 After any method: **restart `dsh web`**.
+
+## Updating
+
+Upgrading is **re-running the same install command** — every method is idempotent:
+
+- Official (needs pnpm): `dsh plugin --profile web add @faith1688/dsh-usage-meter-harness`
+  (you may also use `dsh plugin --profile web update @faith1688/dsh-usage-meter-harness`;
+  `add` resolves the latest version and refreshes the dependency range).
+- No pnpm: `npx -y @faith1688/dsh-usage-meter-harness`
+
+After the command: **restart `dsh web`** (or reload the browser page).
+
+**Why this never duplicates the mount entry and never touches your config:**
+
+- The mount entry lives **inside the package** (`cordis.patch.yml`, the
+  `dsh.bundle` mechanism). Every release ships its own complete entry; DSH reads
+  it from the installed package at startup — installing a newer package
+  automatically brings the correct entry with it.
+- Installers only edit the profile's `package.json` (`dsh.profile.bundles`,
+  de-duplicated) and `node_modules`. They **never write** the profile-root
+  `cordis.patch.yml`, so anything you added there yourself (or your other plugin
+  configs) stays untouched.
+- A duplicate mount entry can only happen if you manually added the same `id` to
+  the profile-root `cordis.patch.yml` yourself — the installers never do that.
 
 ## Features
 
@@ -124,7 +151,7 @@ directly in the plugin UI:
 | `budget` | number | – | Session budget; shows "remaining" when set |
 | `priceSourceUrl` | string | – | LiteLLM-shaped price JSON URL; optional |
 | `refreshIntervalMs` | number | 4 h | Price / balance / rate refresh interval |
-| `deepseekApiKey` | secret | – | Only used to query the DeepSeek balance; `DEEPSEEK_API_KEY` env also works |
+| `deepseekApiKey` | secret | – | Only used to query the DeepSeek balance (stored AES-encrypted; never read from the `DEEPSEEK_API_KEY` env var) |
 
 ## Compatibility
 

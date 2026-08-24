@@ -56,7 +56,32 @@ curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/m
 脚本会自动完成全部步骤：进入 DSH web profile → 安装包（可见进度）→ 注册
 `dsh.profile.bundles`（幂等，升级后重跑安全）。
 
+> 注意：方式三用的是原生 `npm`，**不做 pnpm 协调**。如果你的 profile 由 pnpm
+> 管理（`dsh plugin` 的默认方式），推荐用方式一。
+
 任选一种方式后：**重启 `dsh web`**。
+
+## 更新
+
+更新就是**重跑同一条安装命令**——所有方式都是幂等的：
+
+- 官方（需要 pnpm）：`dsh plugin --profile web add @faith1688/dsh-usage-meter-harness`
+  （也可以用 `dsh plugin --profile web update @faith1688/dsh-usage-meter-harness`；
+  `add` 会解析最新版本并刷新依赖范围）。
+- 不需要 pnpm：`npx -y @faith1688/dsh-usage-meter-harness`
+
+执行后：**重启 `dsh web`**（或刷新浏览器页面）。
+
+**为什么这样更新绝不会产生重复挂载记录、也绝不会动你的配置：**
+
+- 挂载记录在**插件包内部**（`cordis.patch.yml`，`dsh.bundle` 机制）。每个版本
+  自带完整的一条挂载记录；DSH 启动时从已安装的包里读取——装上新版本包，
+  自动就带上新版本的正确记录。
+- 安装器只改 profile 的 `package.json`（`dsh.profile.bundles`，自动去重）和
+  `node_modules`。**从不写** profile 根目录的 `cordis.patch.yml`——你在里面
+  自己加的内容（或其他插件的配置）原样保留。
+- 重复挂载记录只可能发生在：你**手动**往 profile 根 `cordis.patch.yml` 里加了
+  相同的 `id`——安装器永远不会这样做。
 
 ## 功能一览
 
@@ -122,7 +147,7 @@ curl -fsSL https://raw.githubusercontent.com/faith1688/dsh-usage-meter-harness/m
 | `budget` | number | – | 会话预算；设置后显示「剩余」 |
 | `priceSourceUrl` | string | – | LiteLLM 形状的价格 JSON 地址；可选 |
 | `refreshIntervalMs` | number | 4h | 价格 / 余额 / 汇率刷新周期 |
-| `deepseekApiKey` | secret | – | 仅用于查询 DeepSeek 余额；也可用环境变量 `DEEPSEEK_API_KEY` |
+| `deepseekApiKey` | secret | – | 仅用于查询 DeepSeek 余额（AES 加密存储；**不读取**环境变量 `DEEPSEEK_API_KEY`） |
 
 ## 兼容性
 
