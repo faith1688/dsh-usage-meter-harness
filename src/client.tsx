@@ -1296,7 +1296,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   };
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
-  const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 132 };
+  const label: CSSProperties = { fontSize: 13, color: t.brand, minWidth: 132 };
   const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
   const select: CSSProperties = { padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
 
@@ -1312,7 +1312,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     fontSize: 13, background: t.card, color: t.text,
     ...extra,
   });
-  const formLabel: CSSProperties = { width: LABEL_W, minWidth: LABEL_W, fontSize: 13, color: t.text2, textAlign: 'right', whiteSpace: 'nowrap' };
+  const formLabel: CSSProperties = { width: LABEL_W, minWidth: LABEL_W, fontSize: 13, color: t.brand, textAlign: 'right', whiteSpace: 'nowrap' };
   const sectTitle: CSSProperties = { fontSize: 12, fontWeight: 600, color: t.brand, margin: '0 0 6px' };
   const hint: CSSProperties = { fontSize: 11, color: t.text3, lineHeight: 1.5 };
   const btnPrimary: CSSProperties = { height: 30, padding: '0 20px', borderRadius: 6, border: 'none', background: t.brand, color: '#ffffff', fontSize: 13, fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 2px rgba(31,35,40,0.15)' };
@@ -1354,7 +1354,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   return (
     <div style={{ padding: '16px 24px 24px', fontSize: 13, color: t.text }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>dsh-usage-meter-harness</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: t.brand, letterSpacing: 0.5 }}>dsh-usage-meter-harness</h2>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 11, color: t.text3 }}>Language</span>
           <select value={lang} onChange={(ev) => { const v = ev.target.value as Lang; setLangState(v); setLang(v); bump(); }}
@@ -1406,11 +1406,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                   const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
                   if (r.ok) { const d = await r.json() as { usdToCny?: number; rateUpdatedAt?: number }; setPageRate({ usdToCny: typeof d.usdToCny === 'number' ? d.usdToCny : pageRate.usdToCny, updatedAt: typeof d.rateUpdatedAt === 'number' ? d.rateUpdatedAt : Date.now() }); }
                 } catch { /* ignore */ }
-              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
+              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.45)', background: t.card, color: t.brand, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
+            <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: 'none', background: saving ? 'rgba(139,148,158,0.45)' : t.brand, color: '#ffffff', fontWeight: 600, cursor: saving ? 'default' : 'pointer' }}>
               {saving ? tt('savingUnit') : tt('save')}
             </button>            {saveMsg !== '' && (
               <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
@@ -1423,7 +1423,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${t.borderSoft}` }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{L('用量计量 · 模型配置')}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2, color: t.brand }}>{L('用量计量 · 模型配置')}</div>
                 <div style={{ color: t.text3, fontSize: 11, marginBottom: 0 }}>
                   {L('按供应商 → 模型为每个模型单独设置币种、用户余额、单价（含峰谷价对）、生效星期与高峰时段。')}
                 </div>
@@ -1436,7 +1436,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                     type="button"
                     onClick={() => void saveAllModels()}
                     disabled={savingAll}
-                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: savingAll ? 'rgba(139,148,158,0.10)' : t.accent, color: savingAll ? t.text3 : t.text, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: 'none', background: savingAll ? 'rgba(139,148,158,0.45)' : t.brand, color: '#ffffff', fontWeight: 600, cursor: savingAll ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
                   >
                     {savingAll ? 'saving' : L('一键保存全部')}
                   </button>
@@ -1452,7 +1452,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             ) : (
               <div style={{ marginTop: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <label style={{ fontSize: 12, color: t.text2 }} htmlFor="um-provider">{L('供应商')}</label>
+                  <label style={{ fontSize: 12, color: t.brand }} htmlFor="um-provider">{L('供应商')}</label>
                   <select
                     id="um-provider"
                     value={selProvider}
@@ -1468,7 +1468,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                       <input type="checkbox" checked={sharedBalances[selProvider] === true}
                         onChange={(ev) => void toggleSharedBalance(selProvider, ev.target.checked)}
                         style={{ accentColor: t.accent }} />
-                      <span style={{ fontSize: 11, color: t.text2 }}>{L('共享余额（该供应商所有模型共用一个余额）')}</span>
+                      <span style={{ fontSize: 11, color: t.brand }}>{L('共享余额（该供应商所有模型共用一个余额）')}</span>
                     </label>
                   )}
                 </div>
@@ -1495,11 +1495,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                               onClick={() => setExpanded((s) => ({ ...s, [k]: !isOpen }))}
                               style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(77,107,254,0.03))' : 'rgba(77,107,254,0.05)', color: t.text, cursor: 'pointer', borderBottom: isOpen ? '1px solid rgba(77,107,254,0.15)' : 'none' }}
                             >
-                              <span style={{ fontSize: 10, color: t.text3 }}>{isOpen ? '▼' : '▶'}</span>
-                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
-                              {e.peakOn && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(139,148,158,0.12)', color: t.text2, whiteSpace: 'nowrap' }}>{tt('peakBadge')}</span>}
+                              <span style={{ fontSize: 10, color: t.brand }}>{isOpen ? '▼' : '▶'}</span>
+                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: t.brand, fontWeight: 600 }}>{m.label}</span>
+                              {e.peakOn && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(77,107,254,0.12)', color: t.brand, whiteSpace: 'nowrap' }}>{tt('peakBadge')}</span>}
                               {locked && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(220,38,38,0.12)', color: t.error, whiteSpace: 'nowrap' }}>{tt('lockedBadge')}</span>}
-                              <span style={{ fontSize: 10, color: t.text3 }}>{e.currency}</span>
+                              <span style={{ fontSize: 10, color: t.brand, fontWeight: 600 }}>{e.currency}</span>
                             </button>
                             {/* 展开体 */}
                             {isOpen && (
@@ -1589,7 +1589,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                               </label>
                                             );
                                           })}
-                                          <span style={{ fontSize: 11, color: t.text2, minWidth: 56 }}>＝ {L(CUSTOM_BUCKET_LABEL[r.bucket])}</span>
+                                          <span style={{ fontSize: 11, color: t.brand, minWidth: 56, fontWeight: 600 }}>＝ {L(CUSTOM_BUCKET_LABEL[r.bucket])}</span>
                                           {e.peakOn ? (
                                             <span style={{ fontSize: 11, color: t.text3, minWidth: 80, textAlign: 'right' as const }}>{L('峰谷接管 →')}</span>
                                           ) : (
