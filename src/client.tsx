@@ -751,6 +751,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [initialBalance, setInitialBalance] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
+  // 当前汇率 + 获取时间（来自宿主；设置页展示用）。
+  const [pageRate, setPageRate] = useState<{ usdToCny: number; updatedAt: number }>({ usdToCny: 0, updatedAt: 0 });
 
   // 供应商 → 模型 分组定价管理
   const [modelDir, setModelDir] = useState<ModelDirEntry[]>([]);
@@ -788,7 +790,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           providers?: Record<string, { currency?: string; sharedBalance?: boolean }>;
           priceOverrides?: Record<string, PriceOverrideEntry>;
           balances?: BalancesDoc;
+          rate?: { usdToCny?: number; rateUpdatedAt?: number };
         };
+        if (doc.rate && typeof doc.rate.usdToCny === 'number') {
+          setPageRate({ usdToCny: doc.rate.usdToCny, updatedAt: typeof doc.rate.rateUpdatedAt === 'number' ? doc.rate.rateUpdatedAt : 0 });
+        }
         if (cancelled) return;
         const c = doc.config ?? {};
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -1213,11 +1219,27 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
               />
             </div>
           </div>
+          <div style={field}>
+            <label style={label} htmlFor="um-rate">当前汇率（1 USD ≈）</label>
+            <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 360, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: t.text }}>{pageRate.usdToCny > 0 ? pageRate.usdToCny.toFixed(4) : '未获取'} CNY</span>
+              {pageRate.updatedAt > 0 && (
+                <span style={{ fontSize: 11, color: Date.now() - pageRate.updatedAt > 24 * 3600 * 1000 ? t.error : t.text3, whiteSpace: 'nowrap' }}>
+                  获取于 {fmtTime(pageRate.updatedAt)}{Date.now() - pageRate.updatedAt > 24 * 3600 * 1000 ? ' · 已超24h，将自动刷新' : ''}
+                </span>
+              )}
+              <button type="button" onClick={() => void (async () => {
+                try {
+                  const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
+                  if (r.ok) { const d = await r.json() as { usdToCny?: number; rateUpdatedAt?: number }; setPageRate({ usdToCny: typeof d.usdToCny === 'number' ? d.usdToCny : pageRate.usdToCny, updatedAt: typeof d.rateUpdatedAt === 'number' ? d.rateUpdatedAt : Date.now() }); }
+                } catch { /* ignore */ }
+              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', whiteSpace: 'nowrap' }}>刷新汇率</button>
+            </div>
+          </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button type="button" onClick={save} disabled={saving} style={{ fontSize: 13, padding: '6px 18px', borderRadius: 6, border: `1px solid ${t.border}`, background: saving ? 'rgba(139, 148, 158, 0.10)' : t.accent, color: saving ? t.text3 : t.text, cursor: saving ? 'default' : 'pointer' }}>
               {saving ? '保存中…' : '保存'}
-            </button>
-            {saveMsg !== '' && (
+            </button>            {saveMsg !== '' && (
               <span style={{ fontSize: 12, color: saveOk ? t.ok : t.error }}>
                 {saveMsg}{saveOk && apiKey.trim() !== '' ? ' · 已更新 API Key' : ''}
               </span>
@@ -1695,9 +1717,11 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
             onPricingCurrencyChange={onPricingCurrencyChange}
             onResetCurrency={(c) => { setCfgCurrency(c); setCurrencyDirty(false); setModelCurrency(c); setModelCurrencyDirty(false); }}
           />
-          {conversionActive && (
+          {usage.rateUpdatedAt > 0 && (
             <div style={{ color: t.text3, fontSize: 10, marginTop: 2 }}>
-              汇率：1 USD ≈ {rateInfo.usdToCny.toFixed(4)} CNY · 更新于 {fmtTime(rateInfo.rateUpdatedAt)}（{modelCurrency} → {cfgCurrency} 需换算）
+              {conversionActive
+                ? `汇率：1 USD ≈ ${rateInfo.usdToCny.toFixed(4)} CNY · 更新于 ${fmtTime(rateInfo.rateUpdatedAt)}（${modelCurrency} → ${cfgCurrency} 需换算）`
+                : `汇率：1 USD ≈ ${rateInfo.usdToCny.toFixed(4)} CNY · 更新于 ${fmtTime(rateInfo.rateUpdatedAt)}`}
             </div>
           )}
         </div>

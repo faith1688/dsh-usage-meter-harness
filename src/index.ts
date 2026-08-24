@@ -144,7 +144,14 @@ interface PersistedGlobals {
   priceSourceUrl?: string;
   refreshIntervalMs?: number;
   deepseekApiKeyEnc?: string;
+  /** Last known USD→CNY rate + when it was fetched — survives restarts so the
+   *  7.2 placeholder is never used once a real rate has been seen. */
+  usdToCny?: number;
+  rateFetchedAt?: number;
 }
+
+/** Exchange rate older than this is refreshed on the next opportunity. */
+const RATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const providerConfigs: Record<string, { currency?: string; sharedBalance?: boolean }> = {};
 const balances: Record<string, { balance: number; currency: string }> = {};
@@ -296,6 +303,13 @@ function loadPersistedConfig(): void {
     if (!existsSync(p)) return;
     const doc = JSON.parse(readFileSync(p, 'utf8')) as ExtraStateDoc;
     if (doc.globals) pendingGlobals = doc.globals;
+    // Restore the last known exchange rate immediately (before any fetch) so
+    // conversions after a restart use the persisted rate, never the 7.2
+    // placeholder.
+    if (doc.globals && typeof doc.globals.usdToCny === 'number' && doc.globals.usdToCny > 0) {
+      currentPrices.usdToCny = doc.globals.usdToCny;
+      lastRateFetchedAt = typeof doc.globals.rateFetchedAt === 'number' ? doc.globals.rateFetchedAt : 0;
+    }
     if (doc.providers) {
       for (const [provider, cfg] of Object.entries(doc.providers)) {
         const pc: { currency?: string; sharedBalance?: boolean } = {};
@@ -337,6 +351,7 @@ function savePersistedConfig(): void {
       if (runtimeConfig.deepseekApiKeyEnc !== enc) runtimeConfig.deepseekApiKeyEnc = enc;
       globals.deepseekApiKeyEnc = enc;
     }
+    if (currentPrices.usdToCny > 0) { globals.usdToCny = currentPrices.usdToCny; globals.rateFetchedAt = lastRateFetchedAt; }
     const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances, globals };
     writeFileSync(configPath(), JSON.stringify(payload, null, 2), 'utf8');
   } catch (err) {
@@ -933,7 +948,9 @@ class UsageMeterCore {
   maybeRefresh(deepSeekWanted: boolean): void {
     const ms = (this.cfg.refreshIntervalMs as number | undefined) ?? 4 * 60 * 60 * 1000;
     const now = Date.now();
-    if (rateNeeded && now - this.lastRateRefresh >= ms) {
+    if (rateNeeded && now - lastRateFetchedAt >= RATE_MAX_AGE_MS && now - this.lastRateRefresh >= 5 * 60 * 1000) {
+      // 汇率独立于价格周期：超过 24 小时未更新就重新拉取（5 分钟最多尝试一次，
+      // 避免源故障时反复打）。
       this.lastRateRefresh = now;
       void this.refreshRate();
     }
@@ -1065,6 +1082,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       else console.warn('[usage-meter] stored DeepSeek API key could not be decrypted (salt changed?); please re-enter it');
     }
     pendingGlobals = null;
+    // Startup rate freshness: a persisted rate older than 24h is refreshed once
+    // right away so the UI never shows a stale quote all day.
+    if (Date.now() - lastRateFetchedAt >= RATE_MAX_AGE_MS) void meter.refreshRate();
     if (Object.keys(restore).length > 0) {
       void scope.update(restore).then(() => meter.applyConfig(scope.get())).catch((err) => console.warn('[usage-meter] global restore failed:', err));
     }
@@ -1107,7 +1127,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         const cfg = meter.getConfig();
         const safe = { ...cfg, deepseekApiKey: cfg.deepseekApiKey ? '***' : undefined };
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, config: safe, providers: providerConfigs, priceOverrides, balances }));
+        res.end(JSON.stringify({ ok: true, config: safe, providers: providerConfigs, priceOverrides, balances, rate: { usdToCny: currentPrices.usdToCny, rateUpdatedAt: lastRateFetchedAt } }));
         return;
       }
       if (req.method === 'POST') {
