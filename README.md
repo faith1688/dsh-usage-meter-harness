@@ -10,19 +10,41 @@ the official DeepSeek models **and** any custom model registered in DSH.
 
 ## Install
 
-One line, no extra configuration:
+Pick one of the three methods. **Methods 1 and 2 need pnpm** (a one-time machine
+setup used by the DSH CLI itself): `npm install -g pnpm` or `corepack enable`.
+
+### Method 1 — npm registry via DSH CLI (needs pnpm)
 
 ```bash
 dsh plugin --profile web add @faith1688/dsh-usage-meter-harness
 ```
 
-Or straight from GitHub:
+### Method 2 — GitHub via DSH CLI (needs pnpm)
 
 ```bash
 dsh plugin --profile web add github:faith1688/dsh-usage-meter-harness
 ```
 
-Then restart `dsh web`. That's it.
+### Method 3 — plain npm, no pnpm
+
+Install directly into the DSH web profile, then register the bundle:
+
+```bash
+cd %USERPROFILE%\.dsh\profiles\web
+npm i @faith1688/dsh-usage-meter-harness
+```
+
+Open `package.json` in that same folder and add the plugin to the
+`dsh.profile.bundles` array:
+
+```json
+"dsh": { "profile": { "bundles": [ /* ...existing... */, "@faith1688/dsh-usage-meter-harness" ] } }
+```
+
+> Important: `npm i` must run inside the DSH profile folder — installing it in
+> your home directory puts the package in the wrong place and DSH will not load it.
+
+After any method: **restart `dsh web`**.
 
 ## Features
 
