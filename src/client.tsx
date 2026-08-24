@@ -390,7 +390,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             zIndex: 40,
             width: 620,
             maxWidth: 'calc(100vw - 32px)',
-            background: 'linear-gradient(180deg, rgba(77,107,254,0.06), rgba(255,255,255,0.98))',
+            background: 'linear-gradient(180deg, #eef4ff 0%, #ffffff 100%)',
             border: '1px solid rgba(77,107,254,0.35)',
             borderRadius: 12,
             boxShadow: '0 12px 32px rgba(31, 35, 40, 0.18), 0 0 26px rgba(77,107,254,0.16)',
@@ -1296,7 +1296,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   };
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
-  const label: CSSProperties = { fontSize: 13, color: t.brand, minWidth: 132 };
+  const label: CSSProperties = { width: 132, minWidth: 132, fontSize: 13, color: t.brand, whiteSpace: 'nowrap' };
   const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
   const select: CSSProperties = { padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
 
@@ -1354,7 +1354,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   return (
     <div style={{ padding: '16px 24px 24px', fontSize: 13, color: t.text }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: t.brand, letterSpacing: 0.5 }}>dsh-usage-meter-harness</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0, letterSpacing: 0.8, color: t.brand, background: 'linear-gradient(90deg, #4d6bfe 0%, #7c5cff 55%, #38bdf8 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>dsh-usage-meter-harness</h2>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 11, color: t.text3 }}>Language</span>
           <select value={lang} onChange={(ev) => { const v = ev.target.value as Lang; setLangState(v); setLang(v); bump(); }}
@@ -1376,7 +1376,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         <div>
           <div style={field}>
             <label style={label} htmlFor="um-key">{tt('apiKey')}</label>
-            <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 320, alignItems: 'center' }}>
+            <div style={{ flex: 1, display: 'flex', gap: 8, maxWidth: 360, alignItems: 'center' }}>
               {keySaved ? (
                 <span style={{ padding: '4px 8px', borderRadius: 6, background: 'rgba(22, 163, 74, 0.10)', color: t.ok, fontSize: 12, whiteSpace: 'nowrap' }}>{tt('keySavedChip')}</span>
               ) : (
@@ -1406,7 +1406,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                   const r = await fetch('/api/usage-meter/refresh-rate', { method: 'POST' });
                   if (r.ok) { const d = await r.json() as { usdToCny?: number; rateUpdatedAt?: number }; setPageRate({ usdToCny: typeof d.usdToCny === 'number' ? d.usdToCny : pageRate.usdToCny, updatedAt: typeof d.rateUpdatedAt === 'number' ? d.rateUpdatedAt : Date.now() }); }
                 } catch { /* ignore */ }
-              })()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.45)', background: t.card, color: t.brand, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
+              })()} style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.45)', background: 'rgba(77,107,254,0.08)', color: t.brand, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>{L('刷新汇率')}</button>
             </div>
           </div>
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
