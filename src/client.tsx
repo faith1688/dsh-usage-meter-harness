@@ -388,7 +388,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 40,
-            width: 528,
+            width: 620,
             maxWidth: 'calc(100vw - 32px)',
             background: t.card,
             border: `1px solid ${t.border}`,
@@ -435,7 +435,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
 
           <div style={{ ...row, paddingTop: 6 }}>
             <span style={{ color: t.text2 }}>{tt('sessionCost')}</span>
-            <span style={{ fontWeight: 700, color: p ? t.brand : t.text3 }}>{p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : tt('noPriceData')}</span>
+            <span style={{ fontWeight: 700, color: p ? t.brand : t.text3, whiteSpace: 'nowrap' }}>{p ? fmtMoney(usage.estimatedCost, usage.currency, usage) : tt('noPriceData')}</span>
           </div>
 
           {/* 明细表即本轮口径（见下方 priceRows 区），不再单列「本轮」行。 */}
@@ -1295,10 +1295,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setSavingAll(false);
   };
 
-  const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 0' };
-  const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 120 };
-  const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
-  const select: CSSProperties = { padding: '4px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+  const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
+  const label: CSSProperties = { fontSize: 13, color: t.text2, minWidth: 132 };
+  const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
+  const select: CSSProperties = { padding: '6px 8px', border: `1px solid ${t.border}`, borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
 
   const msToReadable = (ms: string): string => {
     const n = Number(ms);
@@ -1371,9 +1371,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                 autoComplete="off"
                 style={{ ...input, maxWidth: 200 }}
               />
-            </div>
-            <div style={{ fontSize: 11, color: t.ok, lineHeight: 1.5 }}>
-              {tt('apiKeyTip')}
             </div>
           </div>
           <div style={field}>
@@ -1493,17 +1490,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 {locked && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('lockedHint')}</div>
                                 )}
-                                {e.prefillOfficial && (
-                                  <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>{tt('prefillOfficial')}</div>
-                                )}
                                 {e.noSavedPrice && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('noSavedPrice')}</div>
                                 )}
-                                  {e.usesSharedBalance === true && (
-                                    <div style={{ color: t.ok, fontSize: 11, lineHeight: 1.4 }}>{tt('sharedBalNote')}</div>
-                                  )}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 10, rowGap: 6, alignItems: 'center' }}>
-                                                                  <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('currency')}</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
+                                                                  <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('currency')}</span>
                                                                   <select id={`um-cur-${k}`} value={e.currency} onChange={(ev) => void switchCurrency(k, ev.target.value)}
                                                                     style={{ ...select, maxWidth: 110, fontSize: 12, padding: '2px 6px' }}>
                                                                     <option value="CNY">CNY (¥)</option>
@@ -1511,19 +1502,18 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                   </select>
                                                                   {!deep && (
                                                                     <>
-                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('balance')}</span>
+                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('balance')}</span>
                                                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                         <input id={`um-bal-${k}`} value={e.balance}
                                                                           onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                                                           placeholder="如 100"
                                                                           style={{ ...input, maxWidth: 140, fontSize: 12, padding: '2px 6px' }} />
-                                                                        <span style={{ fontSize: 10, color: t.ok }}>{tt('balanceTip')}</span>
-                                                                      </div>
+                                                                                                                                              </div>
                                                                     </>
                                                                   )}
                                                                   {templates.length > 0 && (
                                                                     <>
-                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('billingTemplate')}</span>
+                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('billingTemplate')}</span>
                                                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                         <select id={`um-tpl-${k}`} value={e.templateId}
                                                                           onChange={(ev) => {
@@ -1545,14 +1535,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                           <option value="">{L('（自定义）')}</option>
                                                                           {templates.map((tp) => <option key={tp.id} value={tp.id}>{L(tp.label)}</option>)}
                                                                         </select>
-                                                                        <span style={{ fontSize: 10, color: t.ok }}>{tt('templateTip')}</span>
-                                                                      </div>
+                                                                                                                                              </div>
                                                                     </>
                                                                   )}
                                                                   {e.combined && <div style={{ fontSize: 11, color: t.text2, gridColumn: '1 / -1' }}>{tt('discountNote')}</div>}
                                                                   {e.discount !== '' && (
                                                                     <>
-                                                                      <span style={{ fontSize: 11, color: t.text2, textAlign: 'right' as const }}>{tt('batchDiscount')}</span>
+                                                                      <span style={{ fontSize: 13, color: t.text2, textAlign: 'right' as const }}>{tt('batchDiscount')}</span>
                                                                       <input id={`um-disc-${k}`} value={e.discount}
                                                                         onChange={(ev) => setEdits((s) => ({ ...s, [k]: { ...e, discount: ev.target.value } }))}
                                                                         placeholder="如 0.5" style={{ ...input, maxWidth: 90, fontSize: 12, padding: '2px 6px', justifySelf: 'start' }} />
@@ -1880,7 +1869,7 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
                 {saved ? L('已保存') : tt('save')}
               </button>
             )}
-            {isDeepSeek && saveMsg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{saveMsg}</span>}
+            {isDeepSeek && saveMsg !== '' && <span style={{ color: t.text2, fontSize: 10 }}>{saveMsg}</span>}
           </div>
 
           {!isDeepSeek && (
@@ -1892,7 +1881,7 @@ function SettingsSection({ usage }: { usage: UsageCostValue }): ReactElement {
               <button type="button" onClick={save} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.accent, color: t.text, cursor: 'pointer' }}>
                 {saved ? L('已保存') : tt('save')}
               </button>
-              {saveMsg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{saveMsg}</span>}
+              {saveMsg !== '' && <span style={{ color: t.text2, fontSize: 10 }}>{saveMsg}</span>}
             </div>
           )}
 
@@ -2210,7 +2199,7 @@ function PriceEditor({
         <button type="button" onClick={reset} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text, cursor: 'pointer', boxShadow: 'none' }}>{tt('resetPrice')}</button>
         {billing.combined && <span style={{ color: t.text3, fontSize: 10 }}>{L('合并计价')}</span>}
         {billing.discount !== undefined && billing.discount < 1 && <span style={{ color: t.brand, fontSize: 10 }}>{L('Batch 半价')} ×{billing.discount}</span>}
-        {msg !== '' && <span style={{ color: t.ok, fontSize: 10 }}>{msg}</span>}
+        {msg !== '' && <span style={{ color: t.text2, fontSize: 10 }}>{msg}</span>}
       </div>
     </div>
   );
@@ -2228,11 +2217,11 @@ function BucketRow(props: {
   return (
     <div style={row}>
       <span style={{ flex: 1, color: t.text2, minWidth: 0, whiteSpace: 'nowrap' }}>{props.label}</span>
-      <span style={{ width: 92, textAlign: 'right', color: t.text3, whiteSpace: 'nowrap' }}>{formatTokens(props.tokens)}</span>
-      <span style={{ width: 92, textAlign: 'right', color: props.price !== undefined ? t.text2 : t.text3, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 104, textAlign: 'right', color: t.text3, whiteSpace: 'nowrap' }}>{formatTokens(props.tokens)}</span>
+      <span style={{ width: 104, textAlign: 'right', color: props.price !== undefined ? t.text2 : t.text3, whiteSpace: 'nowrap' }}>
         {props.price !== undefined ? fmtPrice(props.price, props.native, props.usage) : '—'}
       </span>
-      <span style={{ width: 92, textAlign: 'right', fontWeight: 600, color: props.accent ?? t.text, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 104, textAlign: 'right', fontWeight: 600, color: props.accent ?? t.text, whiteSpace: 'nowrap' }}>
         {props.price !== undefined ? fmtMoney(props.cost, props.native, props.usage) : '—'}
       </span>
     </div>
