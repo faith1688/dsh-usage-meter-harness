@@ -376,7 +376,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
         )}
         <span style={{ color: t.text3, whiteSpace: 'nowrap' }}>{usage.requestCount} 次</span>
         {rate !== null && (
-          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { color: rate >= 50 ? '#f59e0b' : '#38bdf8' }) }}>
+          <span style={{ whiteSpace: 'nowrap', fontWeight: 700, ...(rate >= 100 ? { background: 'linear-gradient(90deg, #4d6bfe, #8b5cf6, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : rate >= 50 ? { background: 'linear-gradient(90deg, #4d6bfe 0%, #38bdf8 55%, #bae6fd 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { color: '#f59e0b' }) }}>
             · {tt('speed')} {rate.toFixed(1)} tokens/s
           </span>
         )}
