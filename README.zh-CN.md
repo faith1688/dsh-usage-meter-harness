@@ -36,8 +36,7 @@ dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
 
 ```bash
 npx -y @faith1688/dsh-usage-meter-harness
-`
-
+```
 一条命令：自动装进 DSH web profile 并注册 bundle（幂等）。
 
 不想用 npx？仓库里也带了同样的脚本：
