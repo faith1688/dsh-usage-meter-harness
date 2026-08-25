@@ -663,22 +663,22 @@ function emptyUsageCost(state: FoldState): UsageCostValue {
     startedAt: safeNumber(x.startedAt, 0),
     endedAt: safeNumber(x.endedAt, 0),
     endReason: x.endReason ?? null,
-    inputTokens: safeNumber(x.input, 0),
-    outputTokens: safeNumber(x.output, 0),
-    cacheReadTokens: safeNumber(x.cacheRead, 0),
-    cacheWriteTokens: safeNumber(x.cacheWrite, 0),
-    reasoningTokens: safeNumber(x.reasoning, 0),
+    inputTokens: Math.max(0, safeNumber(x.input, 0)),
+    outputTokens: Math.max(0, safeNumber(x.output, 0)),
+    cacheReadTokens: Math.max(0, safeNumber(x.cacheRead, 0)),
+    cacheWriteTokens: Math.max(0, safeNumber(x.cacheWrite, 0)),
+    reasoningTokens: Math.max(0, safeNumber(x.reasoning, 0)),
   }));
   return {
     requestCount: safeNumber(state.requestCount, 0),
     stepCount: safeNumber(state.stepCount, 0),
-    inputTokens: safeNumber(state.inputTokens, 0),
-    outputTokens: safeNumber(state.outputTokens, 0),
-    cacheReadTokens: safeNumber(state.cacheReadTokens, 0),
-    cacheWriteTokens: safeNumber(state.cacheWriteTokens, 0),
-    reasoningTokens: safeNumber(state.reasoningTokens, 0),
-    realtimeOutputTokens: safeNumber(state.realtimeOutputTokens, 0),
-    realtimeUpdatedAt: safeNumber(state.realtimeUpdatedAt, 0),
+    inputTokens: Math.max(0, safeNumber(state.inputTokens, 0)),
+    outputTokens: Math.max(0, safeNumber(state.outputTokens, 0)),
+    cacheReadTokens: Math.max(0, safeNumber(state.cacheReadTokens, 0)),
+    cacheWriteTokens: Math.max(0, safeNumber(state.cacheWriteTokens, 0)),
+    reasoningTokens: Math.max(0, safeNumber(state.reasoningTokens, 0)),
+    realtimeOutputTokens: Math.max(0, safeNumber(state.realtimeOutputTokens, 0)),
+    realtimeUpdatedAt: Math.max(0, safeNumber(state.realtimeUpdatedAt, 0)),
     provider: state.provider,
     model: state.model,
     pricing: null,
@@ -883,12 +883,26 @@ const usageCostProjection = {
       startedAt: t.startedAt,
       endedAt: t.endedAt,
       endReason: t.endReason,
-      inputTokens: t.input,
-      outputTokens: t.output,
-      cacheReadTokens: t.cacheRead,
-      cacheWriteTokens: t.cacheWrite,
-      reasoningTokens: t.reasoning,
+      // Negative per-turn buckets are possible when a later usage sample for the
+      // same step is smaller than an earlier one (retry / provider re-report);
+      // the wire schema requires nonnegative counts, so clamp at the view edge.
+      inputTokens: Math.max(0, t.input),
+      outputTokens: Math.max(0, t.output),
+      cacheReadTokens: Math.max(0, t.cacheRead),
+      cacheWriteTokens: Math.max(0, t.cacheWrite),
+      reasoningTokens: Math.max(0, t.reasoning),
     }));
+    const safeTotals = {
+      requestCount: state.requestCount,
+      stepCount: state.stepCount,
+      inputTokens: Math.max(0, state.inputTokens),
+      outputTokens: Math.max(0, state.outputTokens),
+      cacheReadTokens: Math.max(0, state.cacheReadTokens),
+      cacheWriteTokens: Math.max(0, state.cacheWriteTokens),
+      reasoningTokens: Math.max(0, state.reasoningTokens),
+      realtimeOutputTokens: Math.max(0, state.realtimeOutputTokens),
+      realtimeUpdatedAt: Math.max(0, state.realtimeUpdatedAt),
+    };
     // Live balance (rc.7 safe — reads in-memory state, never a log event):
     //   DeepSeek:   the in-memory snapshot refreshed on every `turn/start`.
     //   others:     the GLOBAL ledger value for this binding key (already
@@ -938,15 +952,7 @@ const usageCostProjection = {
       }
     }
     return {
-      requestCount: state.requestCount,
-      stepCount: state.stepCount,
-      inputTokens: state.inputTokens,
-      outputTokens: state.outputTokens,
-      cacheReadTokens: state.cacheReadTokens,
-      cacheWriteTokens: state.cacheWriteTokens,
-      reasoningTokens: state.reasoningTokens,
-      realtimeOutputTokens: state.realtimeOutputTokens,
-      realtimeUpdatedAt: state.realtimeUpdatedAt,
+      ...safeTotals,
       provider: state.provider,
       model: state.model,
       pricing,
