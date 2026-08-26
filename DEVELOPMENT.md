@@ -101,3 +101,12 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 - 测试套件已被用户要求删除，改 `src/` 后只能靠 `npm run bundle` 校验；
   发布前务必在本机（faith）profile 实际覆盖 + 强刷验证。
 - 临时开发脚本（`_*.mjs`）用完即删，不要提交进仓库（历史上有 14 个被误提交过）。
+- **截图声明**（awesome-dsh-plugin 新规，2026-08-26）：仓库根的 `screenshots.json`
+  是市场截图的唯一声明处，格式为**相对路径数组**（相对本文件，指向仓库内图片）：
+  ```json
+  ["assets/screenshot.png", "assets/popup.png"]
+  ```
+  换/加截图 = 把图放进 `assets/` + 编辑这个 json + push。**不要再去改
+  awesome-dsh-plugin 列表仓库的 `data/screenshots.json`**（108 个 PR 抢的共用
+  文件，必然撞冲突；旧条目仍会被读取，但新投稿一律走自家仓库声明）。
+  该文件已加入 `package.json` 的 `files`，随 npm 包一起发布。
