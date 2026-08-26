@@ -87,6 +87,7 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 | 更新后 UI 还是旧的 | 只重启了 dsh web，没装新版；或浏览器缓存 | 先 `add <pkg>@版本` 再重启，浏览器 Ctrl+Shift+R |
 | 渐变字变成"颜色块"（无文字） | `background-clip:text` 带 `0%/100%` 位置参数时失效；动态改背景色时浏览器不重新裁剪会卡死 | 渐变**不带位置参数**；档位切换用 React `key` 强制重建 span（v1.0.28） |
 | 插件装了但接口 404、无日志 | 包内 cordis.patch.yml insert 被清空（1.0.7 事故） | 恢复恰好一条 insert |
+| 会话打不开：`history unavailable ... too_small turns[N].inputTokens`（v1.0.29 及之前） | usageCost 投影的 delta = 新采样 − 上次采样，LLM 重试/供应商口径变小 → 负数被累进 turn 桶并随投影持久化；wire schema `nonnegative` 解析即抛，整份历史拒载（会话日志本身无负值） | **写入侧**防负（delta 为负时按覆盖处理或钳 0）；**读取侧** view()/emptyUsageCost() 全字段 `Math.max(0,·)` 钳制兜底（v1.0.30）。排查用 `Z:\deepseek\scripts\decode-session.mjs` 多帧解 zstd 核日志 |
 
 ---
 
