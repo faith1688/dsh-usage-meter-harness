@@ -89,6 +89,14 @@ const runtimeConfig: {
 /** Latest DeepSeek account-balance snapshot, surfaced through the projection. */
 let currentBalance: BalanceSnapshot | null = null;
 
+/** Live in-turn estimate (DeepSeek path only, in-memory — rc.7, never persisted):
+ *  `spentSinceAnchor` is the sum of delta costs accrued since the last API
+ *  anchor; the projection reports `currentBalance.totalBalance - spentSinceAnchor`.
+ *  Every successful API refresh re-anchors (resets both to zero); a failed
+ *  refresh KEEPS the estimate so the balance keeps ticking instead of freezing. */
+let spentSinceAnchor = 0;
+let lastLiveAt = 0;
+
 /**
  * True while the currently-active model needs a CNY↔USD conversion (its
  * official pricing currency differs from the configured display currency).
@@ -904,7 +912,14 @@ const usageCostProjection = {
       realtimeUpdatedAt: Math.max(0, state.realtimeUpdatedAt),
     };
     // Live balance (rc.7 safe — reads in-memory state, never a log event):
-    //   DeepSeek:   the in-memory snapshot refreshed on every `turn/start`.
+    //   DeepSeek:   the in-memory API snapshot (anchor) MINUS the in-turn
+    //               estimate accrued since that anchor. Between refreshes this
+    //               ticks down with every usage sample, and the next
+    //               `turn/start` re-anchors from API truth; a failed refresh
+    //               keeps the stale anchor + estimate instead of freezing.
+    //               (Negative values are legal here — the UI already renders
+    //               the 透支 state; `source` flips to 'computed' while the
+    //               estimate is non-zero.)
     //   others:     the GLOBAL ledger value for this binding key (already
     //               delta-decremented server-side; default 0, negative when
     //               spending without a funded balance).
@@ -913,9 +928,9 @@ const usageCostProjection = {
       if (currentBalance !== null) {
         accountBalance = {
           currency: currentBalance.currency,
-          totalBalance: currentBalance.totalBalance,
-          updatedAt: currentBalance.fetchedAt,
-          source: 'api',
+          totalBalance: currentBalance.totalBalance - spentSinceAnchor,
+          updatedAt: Math.max(currentBalance.fetchedAt, lastLiveAt),
+          source: spentSinceAnchor > 0 ? 'computed' : 'api',
         };
       }
     } else {
@@ -1088,13 +1103,19 @@ class UsageMeterCore {
     const apiKey = this.cfg.deepseekApiKey as string | undefined;
     if (!apiKey) {
       currentBalance = null;
+      spentSinceAnchor = 0; // 无锚点：清零场内估计，避免残留脏 offset。
+      lastLiveAt = 0;
       return;
     }
     if (this.balanceRefreshing) return this.balanceRefreshing;
     this.balanceRefreshing = (async () => {
       try {
         currentBalance = toSnapshot(await fetchDeepSeekBalance(apiKey));
+        // 重新锚定：API 真值落地，场内估计清零（实时估计 → 下轮校准）。
+        spentSinceAnchor = 0;
+        lastLiveAt = 0;
       } catch (err) {
+        // 刷新失败：保留旧锚点 + 场内估计，余额继续随采样下降而不冻结。
         console.warn(`[usage-meter] balance refresh failed: ${String(err)}`);
       } finally {
         this.balanceRefreshing = null;
@@ -1416,8 +1437,49 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     if (event.type === 'step/start') {
       stepStartBySession.set(session, { turn: event.data.turn as number, step: event.data.step as number, at: event.time });
     }
+    if (isDeepSeekProvider(provider)) {
+      // LIVE IN-TURN ESTIMATE (DeepSeek path): each usage sample's delta cost
+      // is accrued into `spentSinceAnchor` (CNY — the currency of the API
+      // anchor), so the projection's reported balance
+      // (`currentBalance.totalBalance - spentSinceAnchor`) ticks down between
+      // refreshes; the next `turn/start` recalibrates from API truth.
+      // In-memory only (rc.7): no persist (module state dies with the process
+      // and re-anchors on the next real refresh), no websocket broadcast
+      // (the projection re-emits on every event → the client stays live).
+      // 复用既有 pipeline：usageEventOf → bucketsOf → 去重(step+桶值) → delta
+      // → stepStart 锚定峰/谷 → pricingFor → costOf；唯一差异是分叉到
+      // spentSinceAnchor 而非 ledger，且转换目标固定 CNY（锚点币种），
+      // 因此不受 UI 显示币种设置影响。
+      const ue = usageEventOf(event);
+      if (ue !== null) {
+        const b = bucketsOf(ue.usage);
+        const prev = lastUsageBySession.get(session);
+        const samePrev =
+          prev !== undefined && prev.turn === ue.turn && prev.step === ue.step &&
+          prev.input === b.input && prev.output === b.output &&
+          prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
+        if (!samePrev) {
+          const p = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : undefined;
+          const delta = {
+            input: b.input - (p?.input ?? 0),
+            output: b.output - (p?.output ?? 0),
+            cacheRead: b.cacheRead - (p?.cacheRead ?? 0),
+            cacheWrite: b.cacheWrite - (p?.cacheWrite ?? 0),
+            reasoning: b.reasoning - (p?.reasoning ?? 0),
+          };
+          lastUsageBySession.set(session, { turn: ue.turn, step: ue.step, ...b });
+          const ss = stepStartBySession.get(session);
+          const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
+          const pricing = pricingFor(provider, model, requestStart);
+          if (pricing !== null) {
+            const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
+            spentSinceAnchor += toCurrency(deltaCost, pricing.currency ?? 'CNY', 'CNY', currentPrices.usdToCny);
+            lastLiveAt = Date.now();
+          }
+        }
+      }
+    } else {
     // GLOBAL LEDGER: every usage delta (non-DeepSeek) subtracts only the delta.
-    if (!isDeepSeekProvider(provider)) {
       const ue = usageEventOf(event);
       if (ue !== null) {
         const b = bucketsOf(ue.usage);
@@ -1476,5 +1538,14 @@ export const __testInternals = {
   applyPriceOverrides,
   priceRowsOf,
   currentPrices,
+  // Live in-turn estimate (DeepSeek path): the anchor snapshot and the accrued
+  // offset the projection subtracts from it. Setters exist ONLY so the sim
+  // script can mimic API refresh outcomes (success re-anchors; failure keeps).
+  get spentSinceAnchor(): number { return spentSinceAnchor; },
+  setSpentSinceAnchor(v: number): void { spentSinceAnchor = v; },
+  get lastLiveAt(): number { return lastLiveAt; },
+  setCurrentBalance(s: BalanceSnapshot | null): void { currentBalance = s; },
+  get currentBalance(): BalanceSnapshot | null { return currentBalance; },
+  get balancesMap(): Record<string, { balance: number; currency: string }> { return balances; },
 };
 

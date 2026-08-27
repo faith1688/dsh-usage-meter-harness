@@ -24,6 +24,7 @@ import z from '@deepseek-ai/schemastery';
 import { z as zod } from 'zod';
 import type { Context } from '@deepseek-ai/cordis';
 import { PriceTable } from './prices.ts';
+import type { BalanceSnapshot } from './balance.ts';
 import { costBreakdown, costOf } from './projection.ts';
 import type { BillingRow, ModelPricing, UsageCostValue } from './projection.ts';
 import { BILLING_TYPES } from './billing.ts';
@@ -408,4 +409,13 @@ export declare const __testInternals: {
         updatedAt: number;
         usdToCny: number;
     };
+    readonly spentSinceAnchor: number;
+    setSpentSinceAnchor(v: number): void;
+    readonly lastLiveAt: number;
+    setCurrentBalance(s: BalanceSnapshot | null): void;
+    readonly currentBalance: BalanceSnapshot | null;
+    readonly balancesMap: Record<string, {
+        balance: number;
+        currency: string;
+    }>;
 };
