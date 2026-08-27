@@ -34,22 +34,26 @@
 
 1. `npm run bundle` —— tsc + esbuild，**必须零报错**。
 2. `package.json` 里 bump 版本号（semver，+1 patch/minor）。
-3. `npm pack` —— 生成 `faith1688-dsh-usage-meter-harness-<v>.tgz`。
-4. **本机（faith）验证**：覆盖 profile 的 lib 与 package.json
+3. **同步更新本手册 `DEVELOPMENT.md` 第 3 节**：把"老用户升级"示例命令里的
+   版本号改成这次发布的新版本（如 `...@1.0.32`），并更新踩坑表相关行——确保
+   维护者下次照抄的是正确版本。
+4. `npm pack` —— 生成 `faith1688-dsh-usage-meter-harness-<v>.tgz`。
+5. **本机（faith）验证**：覆盖 profile 的 lib 与 package.json
    （`C:\Users\faith\.dsh\profiles\web\node_modules\@faith1688\dsh-usage-meter-harness`），
    浏览器强刷 Ctrl+Shift+R 确认界面。
-5. `git add` + `git commit` + `git tag v<版本>` + `git push origin main --tags`。
-6. **发布 npm（必须显式 npmjs 源，本机默认 npmmirror 镜像不能发布）**：
+6. `git add` + `git commit` + `git tag v<版本>` + `git push origin main --tags`。
+7. **发布 npm（必须显式 npmjs 源，本机默认 npmmirror 镜像不能发布）**：
    ```
    npm publish --access public --registry https://registry.npmjs.org/ --otp=<验证码>
    ```
-7. `npm view @faith1688/dsh-usage-meter-harness version` 确认线上版本。
+8. `npm view @faith1688/dsh-usage-meter-harness version` 确认线上版本。
 
 ### 发布前自检清单
 
 - [ ] `npm run bundle` 零报错
 - [ ] 包内 `cordis.patch.yml` **恰好一条** insert（不空、不重复）
 - [ ] 版本号已 bump，`npm pack` 能出包
+- [ ] `DEVELOPMENT.md` 第 3 节升级示例命令已改成**本次发布的确切版本号**（不是旧号、不是 `@latest`）
 - [ ] 本机强刷后 UI 与功能符合预期（含峰谷模板、共享余额、速度三档渐变）
 - [ ] `files` 仍是 `lib/cordis.patch.yml/assets/scripts`（本开发文档不进包）
 
@@ -66,14 +70,25 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 
 ### 老用户升级（已有旧版）
 
+> **铁律：升级/更新包必须用【带具体版本号】的命令**，例如
+> `@1.0.31`、`@1.0.32`。**不要用 `@latest`**——pnpm 元数据缓存常把它判定为
+> "Already up to date"，导致更新静默失效、UI 依旧旧版（见第 4 节踩坑表）。
+> 本手册第 3 节的版本示例在每次发新包后同步更新为最新号。
+
 1. 先查 profile 根是否有残留：
    `Get-Content "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml"`，
    若含 `usage-meter` → 跑 `scripts/fix-duplicate.ps1` 删除（一次性）。
-2. **显式带版本号更新**（`@latest` 可能被 pnpm 元数据缓存坑成"Already up to date"）：
+2. **显式带版本号更新**（命令里 `@<版本>` 一律填**本次发布的确切版本号**）：
    ```
-   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@<新版本>
+   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@1.0.32
    ```
+   （历史示例：升到 1.0.31 用 `...@1.0.31`；升到 1.0.32 用 `...@1.0.32`。发布
+   下一个版本时，把这里改成那次的新号，别留着旧号误导后续升级。）
 3. 重启 `dsh web`。**重启本身不会拉新版本**，必须先装进 node_modules。
+
+> **若 `add @1.0.32` 也被判 Already up to date**（说明 profile 里有 `file:` 或
+> `^` 之外的固定绑定）：改用一键安装器 `npx -y @faith1688/dsh-usage-meter-harness@latest`，
+> 它会强制把绑定改写为 `^<最新>` 并升级（v1.0.32 起支持，实测 `file:`→`^` 一键完成）。
 
 ---
 
