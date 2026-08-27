@@ -15,9 +15,13 @@ if (!fs.existsSync(pkgPath)) {
 }
 process.chdir(profileDir);
 console.log(`[1/3] Installing ${NAME} into DSH profile: ${profileDir}`);
+// Always request @latest so an existing pinned/file: binding is rewritten to
+// `^<latest>` and upgraded — re-running this installer is the ONE-COMMAND
+// UPDATE PATH for users (verified: `npm i pkg@latest` overrides a pre-existing
+// `file:` dependency with `^<latest>` and installs the newest version).
 // Windows: npm 是 npm.cmd，不能直接 spawn（EINVAL），必须经 cmd.exe /c 调用。
 // 其他平台直接 spawn npm。
-const args = ['i', '--verbose', NAME];
+const args = ['i', '--verbose', `${NAME}@latest`];
 if (process.platform === 'win32') {
   execFileSync('cmd.exe', ['/c', 'npm', ...args], { stdio: 'inherit' });
 } else {

@@ -88,6 +88,18 @@ pnpm update @faith1688/dsh-usage-meter-harness
 
 (You may also pin an exact version, e.g. `...@1.0.28`.)
 
+**If your `package.json` binds the plugin via a `file:` path or a pin that `add`
+won't override** (you see `Already up to date` / `downloaded 0`), use the
+one-line installer instead — it always requests `@latest`, which rewrites the
+binding to `^<latest>` and upgrades in a single command:
+
+```bash
+npx -y @faith1688/dsh-usage-meter-harness@latest
+```
+
+(Re-running this same command is the permanent update path: it is idempotent
+and upgrades regardless of whether you currently bind via `file:`, a pin, or `^`.)
+
 After updating: **restart `dsh web`** (or reload the browser page). Note that
 restarting alone never fetches a new version — it only reloads what is already
 in `node_modules`.
