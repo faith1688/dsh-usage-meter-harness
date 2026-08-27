@@ -1315,6 +1315,27 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
             ledgerKey = balanceKeyOf(pv, patch.model === null || patch.model === undefined ? null : String(patch.model));
             ledgerEntry = ledgerOf(ledgerKey, pc.currency ?? runtimeConfig.currency);
             if (ledgerKey !== null && ledgerEntry !== null) {
+              // 共享余额运行锁：该供应商已开启共享余额，且组内某一模型正在运行
+              // （activeModel 记录最近运行的 route），则当前模型写入的是同一个
+              // p:<provider> 钱包——运行期间任何余额/充值修改都会联带改到正在
+              // 消耗该钱包的模型 A，造成余额漂移。故运行时一律拒绝，仅对
+              // 非余额字段（单价/币种/模板）放行。
+              const balanceEdited = (patch.balance !== undefined && Number.isFinite(Number(patch.balance))) ||
+                (patch.recharge !== undefined && Number.isFinite(Number(patch.recharge)) && Number(patch.recharge) !== 0);
+              const sharedGroupLocked =
+                pc.sharedBalance === true &&
+                activeModel !== null &&
+                underlyingProvider(activeModel.provider) === underlyingProvider(pv);
+              if (balanceEdited && sharedGroupLocked) {
+                const act = activeModel as { provider: string; model: string };
+                res.writeHead(409, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({
+                  ok: false,
+                  error: 'shared-balance-running',
+                  message: `共享余额启用中，且「${act.provider}/${act.model}」正在运行——组内余额已被锁定，请在轮次结束后再修改余额。`,
+                }));
+                return;
+              }
               if (patch.balance !== undefined && Number.isFinite(Number(patch.balance))) {
                 // 设置页「保存单价」语义：显示值 + 其币种一起原样落盘，不换算。
                 ledgerEntry.balance = Number(patch.balance);

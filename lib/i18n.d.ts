@@ -56,6 +56,7 @@ declare const zh: {
     lockedBadge: string;
     lockedHint: string;
     lockedSaveMsg: string;
+    sharedBalanceLockHint: string;
     prefillOfficial: string;
     noSavedPrice: string;
     sharedBalNote: string;

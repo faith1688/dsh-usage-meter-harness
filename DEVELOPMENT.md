@@ -54,6 +54,9 @@
 - [ ] 包内 `cordis.patch.yml` **恰好一条** insert（不空、不重复）
 - [ ] 版本号已 bump，`npm pack` 能出包
 - [ ] `DEVELOPMENT.md` 第 3 节升级示例命令已改成**本次发布的确切版本号**（不是旧号、不是 `@latest`）
+- [ ] **版本号同步**：`package.json` 的 `version` 与 `DEVELOPMENT.md` 第 3 节示例里的 `@<版本>` 一致（改过模型/脚本/共享逻辑后必查）
+- [ ] 共享余额运行锁回归：`node scripts/test-shared-balance-lock.mjs` 全 PASS（6+ 场景：A 运行改 B 拒 / A 运行改 A 拒 / 停止后放行 / 全模型运行拒 / 多组并行各自锁 / 跨供应商不串扰）
+- [ ] 核心 sim 回归：`node scripts/sim-live-balance.mjs` 全 PASS（DeepSeek 实时余额锚定/估计不被共享锁破坏）
 - [ ] 本机强刷后 UI 与功能符合预期（含峰谷模板、共享余额、速度三档渐变）
 - [ ] `files` 仍是 `lib/cordis.patch.yml/assets/scripts`（本开发文档不进包）
 
@@ -71,7 +74,7 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 ### 老用户升级（已有旧版）
 
 > **铁律：升级/更新包必须用【带具体版本号】的命令**，例如
-> `@1.0.31`、`@1.0.32`。**不要用 `@latest`**——pnpm 元数据缓存常把它判定为
+> `@1.0.31`、`@1.0.32`、`@1.0.33`。**不要用 `@latest`**——pnpm 元数据缓存常把它判定为
 > "Already up to date"，导致更新静默失效、UI 依旧旧版（见第 4 节踩坑表）。
 > 本手册第 3 节的版本示例在每次发新包后同步更新为最新号。
 
@@ -80,13 +83,13 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
    若含 `usage-meter` → 跑 `scripts/fix-duplicate.ps1` 删除（一次性）。
 2. **显式带版本号更新**（命令里 `@<版本>` 一律填**本次发布的确切版本号**）：
    ```
-   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@1.0.32
+   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@1.0.33
    ```
-   （历史示例：升到 1.0.31 用 `...@1.0.31`；升到 1.0.32 用 `...@1.0.32`。发布
-   下一个版本时，把这里改成那次的新号，别留着旧号误导后续升级。）
+   （历史示例：升到 1.0.31 用 `...@1.0.31`；升到 1.0.32 用 `...@1.0.32`；升到
+   1.0.33 用 `...@1.0.33`。发布下一个版本时，把这里改成那次的新号，别留着旧号误导后续升级。）
 3. 重启 `dsh web`。**重启本身不会拉新版本**，必须先装进 node_modules。
 
-> **若 `add @1.0.32` 也被判 Already up to date**（说明 profile 里有 `file:` 或
+> **若 `add @1.0.33` 也被判 Already up to date**（说明 profile 里有 `file:` 或
 > `^` 之外的固定绑定）：改用一键安装器 `npx -y @faith1688/dsh-usage-meter-harness@latest`，
 > 它会强制把绑定改写为 `^<最新>` 并升级（v1.0.32 起支持，实测 `file:`→`^` 一键完成）。
 
@@ -103,6 +106,8 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 | 渐变字变成"颜色块"（无文字） | `background-clip:text` 带 `0%/100%` 位置参数时失效；动态改背景色时浏览器不重新裁剪会卡死 | 渐变**不带位置参数**；档位切换用 React `key` 强制重建 span（v1.0.28） |
 | 插件装了但接口 404、无日志 | 包内 cordis.patch.yml insert 被清空（1.0.7 事故） | 恢复恰好一条 insert |
 | 会话打不开：`history unavailable ... too_small turns[N].inputTokens`（v1.0.29 及之前） | usageCost 投影的 delta = 新采样 − 上次采样，LLM 重试/供应商口径变小 → 负数被累进 turn 桶并随投影持久化；wire schema `nonnegative` 解析即抛，整份历史拒载（会话日志本身无负值） | **写入侧**防负（delta 为负时按覆盖处理或钳 0）；**读取侧** view()/emptyUsageCost() 全字段 `Math.max(0,·)` 钳制兜底（v1.0.30）。排查用 `Z:\deepseek\scripts\decode-session.mjs` 多帧解 zstd 核日志 |
+| 共享余额下改模型 B 余额，连带改了正在运行的模型 A | 共享余额把组内所有模型写入同一个 `p:<provider>` 钱包；后端 config POST 只按 `balanceKeyOf(pv, model)` 写，不校验该组是否正在运行；前端只锁「当前模型」不锁同组其它模型 | 后端守卫 `sharedGroupLocked`（v1.0.33）：同组任一模型运行时拒改余额/充值并返回 `409 shared-balance-running/shard-balance-running` 及原因；前端 `sharedBalanceLocked` 锁定同组所有模型的余额输入框并提示。回归测 `scripts/test-shared-balance-lock.mjs` |
+| 视觉模型 DeepSeek V4 Flash Vision Exp 识别不了 | 模型已适配（`prices-providers.ts` + `client.tsx` OFFICIAL 表），但用户相册仍跑旧版（`file:`/固定绑定未升级，`@latest` 被 pnpm 跳过） | 用**确切版本号** `add ...@1.0.33`，或 `npx -y @faith1688/dsh-usage-meter-harness@latest`；已加 vision-exp 峰谷定价与 UI 预填 |
 
 ---
 
@@ -113,8 +118,10 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 - 客户端 UI 的样式常量（设计 token：`LABEL_W=96`、`CTL_H=30`、`ctl()`、
   `btnPrimary/btnGhost/btnSmall`、`formLabel/sectTitle/hint`）集中在
   `UsageMeterSettingsSection` 函数体内，新 UI 统一复用，禁止散落内联魔法值。
-- 测试套件已被用户要求删除，改 `src/` 后只能靠 `npm run bundle` 校验；
-  发布前务必在本机（faith）profile 实际覆盖 + 强刷验证。
+- 测试套件已被用户要求删除，改 `src/` 后靠 `npm run bundle` + **两个回归脚本**校验：
+  `scripts/sim-live-balance.mjs`（DeepSeek 实时余额锚定/估计）与
+  `scripts/test-shared-balance-lock.mjs`（共享余额运行锁 6+ 场景）；发布前务必在
+  本机（faith）profile 实际覆盖 + 强刷验证。
 - 临时开发脚本（`_*.mjs`）用完即删，不要提交进仓库（历史上有 14 个被误提交过）。
 - **截图声明**（awesome-dsh-plugin 新规，2026-08-26）：仓库根的 `screenshots.json`
   是市场截图的唯一声明处，格式为**相对路径数组**（相对本文件，指向仓库内图片）：

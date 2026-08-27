@@ -1499,7 +1499,17 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                         if (e === undefined) return null;
                         const isOpen = expanded[k] === true;
                         const st = saveStates[k];
-                        const locked = k === activeKey; // 正在使用中的模型：编辑整体锁定
+                        // 使用中模型：编辑整体锁定（运行中的那个模型，所有字段禁改）。
+                        const locked = k === activeKey;
+                        // 共享余额运行锁：该供应商已开启共享余额，且组内任一模型正在
+                        // 运行（activeKey 命中本供应商）→ 组内所有模型的「用户余额/
+                        // 充值」都禁改（它们写入同一个 p:<provider> 钱包，改 B 会联带
+                        // 改动正在运行的 A）。其余参数（单价/币种/模板/峰谷）照常可编辑，
+                        // 后端 shareGroupLocked 只拦余额字段。
+                        const sharedBalanceLocked =
+                          sharedBalances[selProvider] === true &&
+                          activeKey !== '' &&
+                          activeKey.split('/')[0] === selProvider;
                         const cell: CSSProperties = { width: '100%', minWidth: 80, boxSizing: 'border-box', textAlign: 'right' as const, height: CTL_H, padding: '0 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
                         return (
                           <div key={m.model} style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(77,107,254,0.06), 0 2px 12px rgba(31,35,40,0.08), 0 0 20px rgba(77,107,254,0.12)', background: 'linear-gradient(180deg, rgba(77,107,254,0.08), rgba(124,92,255,0.02))' }}>
@@ -1538,10 +1548,15 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                                                       <span style={formLabel}>{tt('balance')}</span>
                                                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                         <input id={`um-bal-${k}`} value={e.balance}
+                                                                          disabled={locked || sharedBalanceLocked}
+                                                                          title={sharedBalanceLocked ? tt('sharedBalanceLockHint') : undefined}
                                                                           onChange={(ev) => editNum(k, 'balance', ev.target.value)}
                                                                           placeholder="如 100"
                                                                           style={ctl({ width: '100%' })} />
                                                                                                                                               </div>
+                                                                      {sharedBalanceLocked && (
+                                                                        <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('sharedBalanceLockHint')}</div>
+                                                                      )}
                                                                     </>
                                                                   )}
                                                                   {templates.length > 0 && (
