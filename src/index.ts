@@ -481,10 +481,35 @@ function bucketsOf(usage: { inputTokens: number; outputTokens: number; cacheRead
   };
 }
 
+/** All-zero usage sample (step-init / empty sample) is not billable and MUST NOT
+ *  overwrite the running per-(turn,step) baseline — otherwise a later real
+ *  sample re-counts the whole request. */
+function isZeroUsage(b: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }): boolean {
+  return b.input === 0 && b.output === 0 && b.cacheRead === 0 && b.cacheWrite === 0 && b.reasoning === 0;
+}
+
+/** Per-bucket delta from the previous sample of the SAME (turn, step), clamped
+ *  to ≥0. A later smaller sample (provider retry / final correction) must never
+ *  yield negative tokens or negative cost — the excess is simply dropped. */
+function deltaOf(prev: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number } | null | undefined, b: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }): { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number } {
+  return {
+    input: Math.max(0, b.input - (prev?.input ?? 0)),
+    output: Math.max(0, b.output - (prev?.output ?? 0)),
+    cacheRead: Math.max(0, b.cacheRead - (prev?.cacheRead ?? 0)),
+    cacheWrite: Math.max(0, b.cacheWrite - (prev?.cacheWrite ?? 0)),
+    reasoning: Math.max(0, b.reasoning - (prev?.reasoning ?? 0)),
+  };
+}
+
 function usageEventOf(event: { type: string; data: Record<string, unknown> }): { turn: number; step: number; usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } } | null {
   if (event.type === 'assistant/chunk' && (event.data.chunk as { type?: string })?.type === 'usage') {
     const chunk = event.data.chunk as { turn?: number; step?: number; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number } };
-    return { turn: chunk.turn ?? 0, step: chunk.step ?? 0, usage: chunk.usage! };
+    // turn/step live on the OUTER event.data (the host appends
+    // `{ turn, step, chunk }`); the inner chunk carries only the model payload.
+    // Reading `chunk.turn` made every usage chunk key as (0,0) and, together
+    // with the following assistant/message at the real (turn,step), double-billed
+    // the request (GitHub issue #1).
+    return { turn: (event.data.turn as number) ?? chunk.turn ?? 0, step: (event.data.step as number) ?? chunk.step ?? 0, usage: chunk.usage! };
   }
   if (event.type === 'assistant/message' && (event.data as { usage?: unknown }).usage !== undefined) {
     return {
@@ -830,20 +855,17 @@ const usageCostProjection = {
 
     const ue = usageEventOf(event);
     if (ue !== null) {
-      const prev = state.last !== null && state.last.turn === ue.turn && state.last.step === ue.step ? state.last : null;
       const b = bucketsOf(ue.usage);
+      // All-zero samples (step init) are not billable and must not clobber the
+      // running baseline, else the next real sample re-counts the request.
+      if (isZeroUsage(b)) return next === state ? state : next;
+      const prev = state.last !== null && state.last.turn === ue.turn && state.last.step === ue.step ? state.last : null;
       const samePrev =
         prev !== null &&
         prev.input === b.input && prev.output === b.output &&
         prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
       if (!samePrev) {
-        const delta = {
-          input: b.input - (prev?.input ?? 0),
-          output: b.output - (prev?.output ?? 0),
-          cacheRead: b.cacheRead - (prev?.cacheRead ?? 0),
-          cacheWrite: b.cacheWrite - (prev?.cacheWrite ?? 0),
-          reasoning: b.reasoning - (prev?.reasoning ?? 0),
-        };
+        const delta = deltaOf(prev, b);
         // DeepSeek bills an entire API request at the peak/off-peak rate active
         // when the request STARTED; `stepStart` was recorded from `step/start`,
         // falling back to the turn start so replay stays deterministic.
@@ -1474,28 +1496,24 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       const ue = usageEventOf(event);
       if (ue !== null) {
         const b = bucketsOf(ue.usage);
-        const prev = lastUsageBySession.get(session);
-        const samePrev =
-          prev !== undefined && prev.turn === ue.turn && prev.step === ue.step &&
-          prev.input === b.input && prev.output === b.output &&
-          prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
-        if (!samePrev) {
-          const p = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : undefined;
-          const delta = {
-            input: b.input - (p?.input ?? 0),
-            output: b.output - (p?.output ?? 0),
-            cacheRead: b.cacheRead - (p?.cacheRead ?? 0),
-            cacheWrite: b.cacheWrite - (p?.cacheWrite ?? 0),
-            reasoning: b.reasoning - (p?.reasoning ?? 0),
-          };
-          lastUsageBySession.set(session, { turn: ue.turn, step: ue.step, ...b });
-          const ss = stepStartBySession.get(session);
-          const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
-          const pricing = pricingFor(provider, model, requestStart);
-          if (pricing !== null) {
-            const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
-            spentSinceAnchor += toCurrency(deltaCost, pricing.currency ?? 'CNY', 'CNY', currentPrices.usdToCny);
-            lastLiveAt = Date.now();
+        if (!isZeroUsage(b)) {
+          const prev = lastUsageBySession.get(session);
+          const samePrev =
+            prev !== undefined && prev.turn === ue.turn && prev.step === ue.step &&
+            prev.input === b.input && prev.output === b.output &&
+            prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
+          if (!samePrev) {
+            const p = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : undefined;
+            const delta = deltaOf(p, b);
+            lastUsageBySession.set(session, { turn: ue.turn, step: ue.step, ...b });
+            const ss = stepStartBySession.get(session);
+            const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
+            const pricing = pricingFor(provider, model, requestStart);
+            if (pricing !== null) {
+              const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
+              spentSinceAnchor += toCurrency(deltaCost, pricing.currency ?? 'CNY', 'CNY', currentPrices.usdToCny);
+              lastLiveAt = Date.now();
+            }
           }
         }
       }
@@ -1504,33 +1522,29 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       const ue = usageEventOf(event);
       if (ue !== null) {
         const b = bucketsOf(ue.usage);
-        const prev = lastUsageBySession.get(session);
-        const samePrev =
-          prev !== undefined && prev.turn === ue.turn && prev.step === ue.step &&
-          prev.input === b.input && prev.output === b.output &&
-          prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
-        if (!samePrev) {
-          const p = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : undefined;
-          const delta = {
-            input: b.input - (p?.input ?? 0),
-            output: b.output - (p?.output ?? 0),
-            cacheRead: b.cacheRead - (p?.cacheRead ?? 0),
-            cacheWrite: b.cacheWrite - (p?.cacheWrite ?? 0),
-            reasoning: b.reasoning - (p?.reasoning ?? 0),
-          };
-          lastUsageBySession.set(session, { turn: ue.turn, step: ue.step, ...b });
-          const ss = stepStartBySession.get(session);
-          const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
-          const pricing = pricingFor(provider, model, requestStart);
-          if (pricing !== null) {
-            const key = balanceKeyOf(provider, model);
-            const ledger = ledgerOf(key, getProviderConfig(provider).currency ?? runtimeConfig.currency);
-            if (key !== null && ledger !== null) {
-              const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
-              const costInLedger = toCurrency(deltaCost, pricing.currency ?? 'CNY', ledger.currency, currentPrices.usdToCny);
-              ledger.balance = ledger.balance - costInLedger;
-              persist.schedule();
-              broadcastBalance(key, ledger, 'deduct');
+        if (!isZeroUsage(b)) {
+          const prev = lastUsageBySession.get(session);
+          const samePrev =
+            prev !== undefined && prev.turn === ue.turn && prev.step === ue.step &&
+            prev.input === b.input && prev.output === b.output &&
+            prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning;
+          if (!samePrev) {
+            const p = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : undefined;
+            const delta = deltaOf(p, b);
+            lastUsageBySession.set(session, { turn: ue.turn, step: ue.step, ...b });
+            const ss = stepStartBySession.get(session);
+            const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
+            const pricing = pricingFor(provider, model, requestStart);
+            if (pricing !== null) {
+              const key = balanceKeyOf(provider, model);
+              const ledger = ledgerOf(key, getProviderConfig(provider).currency ?? runtimeConfig.currency);
+              if (key !== null && ledger !== null) {
+                const deltaCost = costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
+                const costInLedger = toCurrency(deltaCost, pricing.currency ?? 'CNY', ledger.currency, currentPrices.usdToCny);
+                ledger.balance = ledger.balance - costInLedger;
+                persist.schedule();
+                broadcastBalance(key, ledger, 'deduct');
+              }
             }
           }
         }
@@ -1569,4 +1583,6 @@ export const __testInternals = {
   get currentBalance(): BalanceSnapshot | null { return currentBalance; },
   get balancesMap(): Record<string, { balance: number; currency: string }> { return balances; },
 };
+
+
 

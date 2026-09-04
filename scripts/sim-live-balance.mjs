@@ -165,10 +165,24 @@ function stepStart(session, turn, step) {
   advance(session, 'step/start', { turn, step }, at());
 }
 function usageChunk(session, turn, step, inputTokens, outputTokens) {
+  // Real host shape (dsh-agent-loop): turn/step are OUTER, the chunk carries
+  // only the model payload. The plugin's old `chunk.turn ?? 0` read the wrong
+  // layer and keyed every usage chunk as (0,0) — this shape reproduces that
+  // exactly, so the regression below guards against it coming back.
   advance(
     session,
     'assistant/chunk',
-    { chunk: { type: 'usage', turn, step, usage: { inputTokens, outputTokens } } },
+    { turn, step, chunk: { type: 'usage', usage: { inputTokens, outputTokens } } },
+    at(),
+  );
+}
+function usageMessage(session, turn, step, inputTokens, outputTokens) {
+  // Final assistant/message: turn/step outer, usage outer (dsh-agent-loop
+  // appends `{ turn, step, message, usage }`).
+  advance(
+    session,
+    'assistant/message',
+    { turn, step, message: {}, usage: { inputTokens, outputTokens } },
     at(),
   );
 }
@@ -176,6 +190,7 @@ const viewOf = (session) => FOLD.view(states.get(session)).accountBalance;
 
 const s1 = { name: 'deepseek-session' };
 const s2 = { name: 'baidu-session' };
+const s3 = { name: 'issue1-session' };
 
 // ══ Phase 1: no API key — reset-to-zero path, zero network calls ═════════════
 await scopeRef.update({ deepseekApiKey: '' }); // explicit empty key (production write path)
@@ -286,6 +301,46 @@ usageChunk(s2, 0, 0, 1000, 2000); // 1000/1M*4 + 2000/1M*16 = 0.036 CNY
   check('8d', 'view(s2) source computed', v?.source, 'computed');
   check('8e', 'view(s2) totalBalance≈99.964', v?.totalBalance, 99.964, 1e-9);
   check('8f', 'no per-model ledger key created', 'm:baidu/ernie-4.5' in TI.balancesMap, false);
+}
+
+// ══ Phase 9: issue #1 — chunk + message for the SAME request must settle once ═
+// A real DSH request emits BOTH a streamed `assistant/chunk` (type=usage) and a
+// final `assistant/message` carrying the SAME usage. The pre-fix code read the
+// chunk's turn/step from the WRONG layer → (0,0), so the two events failed to
+// dedup and the request was billed ~2× (issue #1). After the fix they share the
+// real (turn,step) and the second event is a no-op. Uses a FRESH session (s3) so
+// the per-session dedup baseline starts empty.
+TI.balancesMap['p:baidu'] = { balance: 100, currency: 'CNY' }; // fresh funded seed
+requestHeader(s3, 'baidu', 'ernie-4.5');
+turnStart(s3, 1);
+stepStart(s3, 1, 0);
+usageChunk(s3, 1, 0, 1000, 2000);    // Δ = 0.036 CNY
+usageMessage(s3, 1, 0, 1000, 2000);  // same request, same usage → must dedup
+{
+  const ledger = TI.balancesMap['p:baidu'];
+  check('9a', 'issue#1: chunk+message billed once (≈99.964)', ledger?.balance, 99.964, 1e-9);
+}
+
+// ══ Phase 10: all-zero init sample must not bill NOR clobber the baseline ════
+stepStart(s3, 2, 0);
+usageChunk(s3, 2, 0, 0, 0);          // zero sample — not billable
+{
+  const ledger = TI.balancesMap['p:baidu'];
+  check('10a', 'zero sample: ledger unchanged (99.964)', ledger?.balance, 99.964, 1e-9);
+}
+usageChunk(s3, 2, 0, 1000, 2000);    // real sample right after — must count full
+{
+  const ledger = TI.balancesMap['p:baidu'];
+  check('10b', 'zero sample: real sample still counts full (≈99.928)', ledger?.balance, 99.928, 1e-9);
+}
+
+// ══ Phase 11: smaller later sample (retry/correction) must not go negative ═══
+stepStart(s3, 3, 0);
+usageChunk(s3, 3, 0, 1000, 2000);    // Δ = 0.036 → 99.892
+usageChunk(s3, 3, 0, 500, 1000);     // smaller → delta clamped to 0, no refund
+{
+  const ledger = TI.balancesMap['p:baidu'];
+  check('11a', 'smaller sample: no negative delta (still ≈99.892)', ledger?.balance, 99.892, 1e-9);
 }
 
 // ── teardown ────────────────────────────────────────────────────────────────
