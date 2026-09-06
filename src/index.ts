@@ -22,9 +22,8 @@
  */
 import z from '@deepseek-ai/schemastery';
 import { z as zod } from 'zod';
-import { settingsNamespace } from '@deepseek-ai/dsh-settings';
 import type { Context } from '@deepseek-ai/cordis';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -59,6 +58,9 @@ const Config = z.object({
   initialBalance: z.number(),
   /** Optional per-session budget; remaining = budget − estimated cost. */
   budget: z.number(),
+  /** Server-side directory for exported/imported billing configs
+   *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
+  billingConfigDir: z.string().default(''),
 });
 
 /** Stable Cordis plugin name. */
@@ -412,6 +414,58 @@ function savePersistedConfig(): void {
   } catch (err) {
     console.warn('[usage-meter] failed to persist config:', err);
   }
+}
+
+/** Resolve the server-side billing-config directory. Empty setting →
+ *  `$DSH_HOME/usage-meter` (DSH_HOME survives upgrades; isolation from session
+ *  files). */
+function effectiveBillingDir(cfg: Record<string, unknown>): string {
+  const s = typeof cfg.billingConfigDir === 'string' && cfg.billingConfigDir.trim() !== '' ? cfg.billingConfigDir.trim() : join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'usage-meter');
+  return s;
+}
+
+/** Sanitize provider/model into a safe filename segment. */
+function safeName(s: string): string {
+  return String(s).replace(/[^\w.-]+/g, '_');
+}
+
+/** JSON 内容规范化：递归按 key 排序、数组保序，用于「同名配置内容是否一致」的
+ *  顺序无关比较（避免 JSON 键序差异导致的误判）。 */
+function canonicalize(v: unknown): string {
+  if (v === undefined) return '~undefined~';
+  if (v === null) return 'null';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NaN';
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(canonicalize).join(',') + ']';
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return '{' + Object.keys(o).sort().map((k) => JSON.stringify(k) + ':' + canonicalize(o[k])).join(',') + '}';
+  }
+  return String(v);
+}
+
+/** Apply (or reset) a model's billing override — shared by the config POST
+ *  handler and the import-config endpoint so both persist identically. */
+function applyModelOverride(
+  provider: string | null,
+  model: string | null,
+  patch: { reset?: boolean; prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string },
+): void {
+  if (provider === null || model === null) return;
+  const key = `${provider}/${model}`;
+  if (patch.reset === true) {
+    delete priceOverrides[key];
+    if (BUNDLED_TABLE[key as PriceKey] !== undefined) currentPrices.table.merge({ [key as PriceKey]: BUNDLED_TABLE[key as PriceKey] as unknown as ModelPricing });
+    else currentPrices.table.removeRaw(key);
+  } else {
+    const next = { ...(priceOverrides[key] ?? {}) } as { prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string };
+    if (patch.prices !== undefined) next.prices = { ...(patch.prices as Partial<ModelPricing>) };
+    if (patch.rows !== undefined) next.rows = [...(patch.rows as BillingRow[])];
+    if (typeof patch.templateId === 'string') next.templateId = patch.templateId;
+    priceOverrides[key] = next;
+    applyPriceOverrides();
+  }
+  savePersistedConfig();
 }
 
 /** Effective per-provider config; DeepSeek alias maps to canonical, then `*` defaults. */
@@ -1194,7 +1248,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // schema-defaults → composition `base` → settings.yaml `usage-meter` user
   // section; a user-written section always wins, and `scope.update` is the one
   // write path (the popup POST and the settings UI both go through it).
-  const scope = ctx.settings.register(settingsNamespace('usage-meter'), Config, { base: config });
+  const scope = ctx.settings.register('usage-meter', Config, { base: config });
   meter.applyConfig(scope.get());
   // Restore globals persisted in the extra-state file when the settings
   // namespace itself lost them across a restart (web compositions without a
@@ -1284,6 +1338,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         if (patch.budget !== undefined && typeof patch.budget === 'number' && Number.isFinite(patch.budget)) globalPatch.budget = patch.budget;
         if (patch.priceSourceUrl !== undefined) globalPatch.priceSourceUrl = patch.priceSourceUrl;
         if (patch.refreshIntervalMs !== undefined) globalPatch.refreshIntervalMs = patch.refreshIntervalMs;
+        if (patch.billingConfigDir !== undefined && typeof patch.billingConfigDir === 'string' && patch.billingConfigDir !== '') globalPatch.billingConfigDir = patch.billingConfigDir;
         if (patch.deepseekApiKey !== undefined && patch.deepseekApiKey !== '***') globalPatch.deepseekApiKey = patch.deepseekApiKey;
         if (Object.keys(globalPatch).length > 0) {
           try {
@@ -1388,21 +1443,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         }
         if (ledgerChanged && ledgerKey !== null && ledgerEntry !== null) broadcastBalance(ledgerKey, ledgerEntry, 'manual');
         if (patch.model !== undefined && patch.model !== null && patch.provider !== undefined && patch.provider !== null) {
-          const key = `${patch.provider}/${patch.model}`;
-          const override = patch;
-          if (override.reset === true) {
-            delete priceOverrides[key];
-            if (BUNDLED_TABLE[key as PriceKey] !== undefined) currentPrices.table.merge({ [key as PriceKey]: BUNDLED_TABLE[key as PriceKey] as unknown as ModelPricing });
-            else currentPrices.table.removeRaw(key);
-          } else {
-            const next = { ...(priceOverrides[key] ?? {}) } as { prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string };
-            if (override.prices !== undefined) next.prices = { ...(override.prices as Partial<ModelPricing>) };
-            if (override.rows !== undefined) next.rows = [...(override.rows as BillingRow[])];
-            if (typeof override.templateId === 'string') next.templateId = override.templateId;
-            priceOverrides[key] = next;
-            applyPriceOverrides();
-          }
-          savePersistedConfig();
+          applyModelOverride(String(patch.provider), String(patch.model), patch as { reset?: boolean; prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string });
         }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
@@ -1410,6 +1451,149 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       }
       res.writeHead(405);
       res.end();
+    },
+  });
+
+  // ── 计费配置目录：导出/列出/从目录导入/删除（同一持久目录，浏览器 ↔ 宿主）──
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/export-config',
+    handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      let body = '';
+      for await (const chunk of req) body += String(chunk);
+      let doc: Record<string, unknown>;
+      try { doc = JSON.parse(body) as Record<string, unknown>; } catch { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'bad json' })); return; }
+      const provider = typeof doc.provider === 'string' ? doc.provider : '';
+      const model = typeof doc.model === 'string' ? doc.model : '';
+      if (provider === '' || model === '') { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'provider/model required' })); return; }
+      const dir = effectiveBillingDir(meter.getConfig());
+      const templateId = typeof doc.templateId === 'string' ? doc.templateId : '';
+      const displayCurrency = typeof doc.displayCurrency === 'string' && doc.displayCurrency !== '' ? doc.displayCurrency : 'CNY';
+      const prices = typeof doc.prices === 'object' && doc.prices !== null ? doc.prices : {};
+      const rows = Array.isArray(doc.rows) ? doc.rows : undefined;
+      const requestedName = typeof doc.fileName === 'string' && doc.fileName.trim() !== '' ? doc.fileName.trim() : '';
+      const force = doc.force === true;
+      // 计费内容规范键（排除 exportedAt 时间戳），用于判定「同名配置内容是否一致」。
+      const newKey = canonicalize([provider, model, templateId, displayCurrency, prices, rows]);
+      const effectiveName = requestedName !== '' ? requestedName : `dsh-billing-${safeName(provider)}-${safeName(model)}.json`;
+      if (!effectiveName.endsWith('.json') || effectiveName.includes('..') || effectiveName.includes('/') || effectiveName.includes('\\')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'invalid fileName' })); return; }
+      const full = join(dir, effectiveName);
+      // 存在性/一致性检查：存在且未强制时先不写盘，交回客户端决定（覆盖/改名/跳过相同）。
+      let exists = false; let identical = false;
+      try {
+        if (existsSync(full)) {
+          exists = true;
+          const prev = JSON.parse(readFileSync(full, 'utf8')) as { sourceProvider?: string; sourceModel?: string; templateId?: unknown; displayCurrency?: unknown; prices?: unknown; rows?: unknown };
+          identical = canonicalize([prev.sourceProvider, prev.sourceModel, prev.templateId, prev.displayCurrency, prev.prices, prev.rows]) === newKey;
+        }
+      } catch { exists = false; }
+      if (exists && !force) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, exists: true, identical, path: full }));
+        return;
+      }
+      try {
+        mkdirSync(dir, { recursive: true });
+        const fileDoc = {
+          __dshUsageMeter: 1, kind: 'model-billing-config', version: 1,
+          sourceProvider: provider, sourceModel: model,
+          templateId, displayCurrency, prices, ...(rows !== undefined ? { rows } : {}),
+          exportedAt: new Date().toISOString(),
+        };
+        writeFileSync(full, JSON.stringify(fileDoc, null, 2), 'utf8');
+      } catch (err) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, created: true, exists, path: full }));
+    },
+  });
+
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/delete-config',
+    handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      let body = '';
+      for await (const chunk of req) body += String(chunk);
+      let doc: Record<string, unknown>;
+      try { doc = JSON.parse(body) as Record<string, unknown>; } catch { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'bad json' })); return; }
+      const fileName = typeof doc.fileName === 'string' ? doc.fileName : '';
+      if (fileName === '' || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'invalid fileName' })); return; }
+      const full = join(effectiveBillingDir(meter.getConfig()), fileName);
+      try {
+        if (!existsSync(full)) { res.writeHead(404, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'not found' })); return; }
+        rmSync(full, { force: true });
+      } catch (err) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    },
+  });
+
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/list-configs',
+    handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      const dir = effectiveBillingDir(meter.getConfig());
+      let files: Array<{ name: string; provider: string; model: string; mtime: number }> = [];
+      try {
+        for (const f of readdirSync(dir)) {
+          if (!f.endsWith('.json') || !f.startsWith('dsh-billing-')) continue;
+          let info = { provider: '', model: '' };
+          try {
+            const parsed = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { sourceProvider?: string; sourceModel?: string };
+            info = { provider: typeof parsed.sourceProvider === 'string' ? parsed.sourceProvider : '', model: typeof parsed.sourceModel === 'string' ? parsed.sourceModel : '' };
+          } catch { /* skip malformed */ }
+          let mtime = 0;
+          try { mtime = statSync(join(dir, f)).mtimeMs; } catch { mtime = 0; }
+          files.push({ name: f, provider: info.provider, model: info.model, mtime });
+        }
+      } catch { files = []; }
+      files.sort((a, b) => b.mtime - a.mtime);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, dir, files }));
+    },
+  });
+
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/import-config',
+    handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      let body = '';
+      for await (const chunk of req) body += String(chunk);
+      let doc: Record<string, unknown>;
+      try { doc = JSON.parse(body) as Record<string, unknown>; } catch { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'bad json' })); return; }
+      const provider = typeof doc.provider === 'string' ? doc.provider : '';
+      const model = typeof doc.model === 'string' ? doc.model : '';
+      const fileName = typeof doc.fileName === 'string' ? doc.fileName : '';
+      if (provider === '' || model === '' || fileName === '') { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'provider/model/fileName required' })); return; }
+      if (fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, error: 'invalid fileName' })); return; }
+      const dir = effectiveBillingDir(meter.getConfig());
+      let parsed: { __dshUsageMeter?: unknown; prices?: unknown; templateId?: unknown; rows?: unknown };
+      try {
+        parsed = JSON.parse(readFileSync(join(dir, fileName), 'utf8')) as typeof parsed;
+      } catch (err) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+        return;
+      }
+      if (parsed === null || typeof parsed !== 'object' || parsed.__dshUsageMeter !== 1 || typeof parsed.prices !== 'object' || parsed.prices === null) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'invalid config' }));
+        return;
+      }
+      applyModelOverride(provider, model, {
+        prices: parsed.prices as Partial<ModelPricing>,
+        ...(Array.isArray(parsed.rows) ? { rows: parsed.rows as BillingRow[] } : {}),
+        ...(typeof parsed.templateId === 'string' ? { templateId: parsed.templateId as string } : {}),
+      });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
     },
   });
 

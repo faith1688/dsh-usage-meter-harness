@@ -41,6 +41,9 @@ declare const Config: z<Schemastery.ObjectS<{
     initialBalance: z<number, number>;
     /** Optional per-session budget; remaining = budget − estimated cost. */
     budget: z<number, number>;
+    /** Server-side directory for exported/imported billing configs
+     *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
+    billingConfigDir: z<string, string>;
 }>, Schemastery.ObjectT<{
     /** Display / ledger currency (CNY default; USD via the popup). */
     currency: z<string, string>;
@@ -54,6 +57,9 @@ declare const Config: z<Schemastery.ObjectS<{
     initialBalance: z<number, number>;
     /** Optional per-session budget; remaining = budget − estimated cost. */
     budget: z<number, number>;
+    /** Server-side directory for exported/imported billing configs
+     *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
+    billingConfigDir: z<string, string>;
 }>>;
 /** Stable Cordis plugin name. */
 export declare const name = "usage-meter";

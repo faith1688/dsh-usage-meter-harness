@@ -824,6 +824,15 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // 当前正在使用（轮次进行中）的模型 key：设置页据此锁定该模型的编辑。
   const [activeKey, setActiveKey] = useState('');
   const activeKeyRef = useRef('');
+  // 计费配置导出/导入：导入目标（哪张卡发起的导入）+ 隐藏文件选择框。
+  const importTargetRef = useRef<{ provider: string; model: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // 计费配置目录：导入面板打开的模型卡 + 目录内配置列表 + 实际目录 + 可编辑路径。
+  const [importPickerKey, setImportPickerKey] = useState('');
+  const [dirConfigs, setDirConfigs] = useState<Array<{ name: string; provider: string; model: string; mtime: number }>>([]);
+  const [configDir, setConfigDir] = useState('');
+  const [configDirInput, setConfigDirInput] = useState('');
+  const [dirMsg, setDirMsg] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -856,6 +865,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         const c = doc.config ?? {};
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
         setKeySaved(c.deepseekApiKey === '***');
+        setConfigDirInput(typeof (c as Record<string, unknown>).billingConfigDir === 'string' && String((c as Record<string, unknown>).billingConfigDir) !== '' ? String((c as Record<string, unknown>).billingConfigDir) : '');
         setOverrides(doc.priceOverrides ?? {});
         setBalances(doc.balances ?? {});
         const sb: Record<string, boolean> = {};
@@ -1309,6 +1319,197 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setSavingAll(false);
   };
 
+  // ── 计费配置导出/导入（把某模型的计费模板快速复用到另一模型）────────────
+  // 导出：把该模型当前编辑态经 buildModelBody 生成的 POST body 中的计费配置
+  // （prices/rows/templateId/displayCurrency，不含用户余额）序列化为自描述 JSON
+  // 下载。导入：把这份 JSON 应用到目标模型——POST 走 /api/usage-meter/config，
+  // 复用 persistModel；导入成功后 overrides 变化触发草稿重播种，目标模型编辑器
+  // 自动刷新为导入的模板/价格（含峰谷）。
+  const saveStatus = (k: string, ok: boolean, msg: string): void => {
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg } }));
+    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
+  };
+
+  const exportModelConfig = async (provider: string, model: string): Promise<void> => {
+    const k = draftKeyOf(provider, model);
+    const body = buildModelBody(provider, model);
+    if (body === null) return;
+    const payload = {
+      templateId: body.templateId,
+      displayCurrency: body.displayCurrency,
+      prices: body.prices ?? {},
+      ...(Array.isArray(body.rows) ? { rows: body.rows } : {}),
+    };
+    const call = async (extra: { fileName?: string; force?: boolean }): Promise<{ ok: boolean; created?: boolean; exists?: boolean; identical?: boolean }> => {
+      try {
+        const res = await fetch('/api/usage-meter/export-config', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider, model, ...payload, ...extra }),
+        });
+        if (!res.ok) return { ok: false };
+        return (await res.json().catch(() => ({}))) as { ok: boolean; created?: boolean; exists?: boolean; identical?: boolean };
+      } catch (err) {
+        console.warn('[usage-meter] export billing config failed', err);
+        return { ok: false };
+      }
+    };
+    const base = `dsh-billing-${provider.replace(/[^\w.-]+/g, '_')}-${model.replace(/[^\w.-]+/g, '_')}`;
+    // 1) 先探测存在性/一致性（不写盘）。
+    const probe = await call({});
+    if (!probe.ok) { saveStatus(k, false, L('导出失败')); return; }
+    if (probe.created === true) { saveStatus(k, true, L('已导出到计费配置目录')); return; }
+    if (probe.exists === true && probe.identical === true) { saveStatus(k, false, L('已存在相同配置，未重复导出')); return; }
+    if (probe.exists === true && probe.identical !== true) {
+      // 同名但内容不同 → 覆盖 or 改名。
+      if (window.confirm(L('已存在同名但内容不同的配置，是否覆盖？'))) {
+        const r = await call({ force: true });
+        saveStatus(k, r.ok === true, r.ok === true ? L('已覆盖') : L('导出失败'));
+        return;
+      }
+      const suggested = `${base} (1).json`;
+      const name = window.prompt(L('不覆盖，改用新文件名保存：'), suggested);
+      if (name === null || name.trim() === '') return;
+      const fname = name.trim().endsWith('.json') ? name.trim() : `${name.trim()}.json`;
+      const r = await call({ fileName: fname });
+      if (r.ok === true && r.created === true) { saveStatus(k, true, L('已导出到计费配置目录')); return; }
+      if (r.exists === true) { saveStatus(k, false, L('该文件名已存在，请换名重试')); return; }
+      saveStatus(k, r.ok === true, r.ok === true ? L('已导出到计费配置目录') : L('导出失败'));
+      return;
+    }
+    saveStatus(k, false, L('导出失败'));
+  };
+
+  /** 触发导入：打开目录导入面板（列目录里的计费配置 + 手动选文件）。模型中则拒绝。 */
+  const triggerImport = async (provider: string, model: string): Promise<void> => {
+    const k = draftKeyOf(provider, model);
+    if (k === activeKeyRef.current) {
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: tt('lockedSaveMsg') } }));
+      window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
+      return;
+    }
+    try {
+      const res = await fetch('/api/usage-meter/list-configs');
+      if (res.ok) {
+        const d = (await res.json()) as { dir?: string; files?: Array<{ name: string; provider: string; model: string; mtime: number }> };
+        setDirConfigs(d.files ?? []);
+        setConfigDir(typeof d.dir === 'string' ? d.dir : '');
+      }
+    } catch { /* keep last list */ }
+    setImportPickerKey((prev) => (prev === k ? '' : k));
+  };
+
+  /** 从目录导入：服务端读取指定配置文件并应用到目标模型，随后刷新客户端。 */
+  const importFromDir = async (targetProvider: string, targetModel: string, fileName: string): Promise<void> => {
+    const k = draftKeyOf(targetProvider, targetModel);
+    setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: tt('savingUnit') } }));
+    let ok = false;
+    try {
+      const res = await fetch('/api/usage-meter/import-config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: targetProvider, model: targetModel, fileName }),
+      });
+      ok = res.ok;
+      if (res.ok) await reloadConfig();
+    } catch (err) {
+      console.warn('[usage-meter] import-from-dir failed', err);
+    }
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? L('已导入计费配置') : L('导入失败') } }));
+    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3000);
+    setImportPickerKey('');
+  };
+
+  /** 重新拉取配置，让 overrides/balances 变化触发草稿重播种（目录导入后刷新编辑器）。 */
+  const reloadConfig = async (): Promise<void> => {
+    try {
+      const res = await fetch('/api/usage-meter/config');
+      if (!res.ok) return;
+      const doc = (await res.json()) as { providers?: Record<string, { currency?: string; sharedBalance?: boolean }>; priceOverrides?: Record<string, PriceOverrideEntry>; balances?: BalancesDoc };
+      setOverrides(doc.priceOverrides ?? {});
+      setBalances(doc.balances ?? {});
+      const sb: Record<string, boolean> = {};
+      for (const [pv, pc] of Object.entries(doc.providers ?? {})) if (pc.sharedBalance === true) sb[pv] = true;
+      setSharedBalances(sb);
+    } catch { /* ignore */ }
+  };
+
+  /** 保存「计费配置目录」设置（空 = 恢复默认 DSH_HOME/usage-meter），经 config POST 落盘。 */
+  const saveBillingConfigDir = async (): Promise<void> => {
+    setDirMsg('');
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ billingConfigDir: configDirInput.trim() }),
+      });
+      if (res.ok) {
+        const lr = await fetch('/api/usage-meter/list-configs');
+        if (lr.ok) { const d = (await lr.json()) as { dir?: string }; setConfigDir(typeof d.dir === 'string' ? d.dir : ''); }
+        setDirMsg(L('目录已保存'));
+      } else {
+        setDirMsg(L('保存失败'));
+      }
+    } catch (err) {
+      console.warn('[usage-meter] save billingConfigDir failed', err);
+      setDirMsg(L('保存失败'));
+    }
+    window.setTimeout(() => setDirMsg(''), 3000);
+  };
+
+  /** 一键删除目录里某条已导出的计费配置。 */
+  const deleteConfig = async (fileName: string): Promise<void> => {
+    try {
+      const res = await fetch('/api/usage-meter/delete-config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fileName }),
+      });
+      if (res.ok) setDirConfigs((s) => s.filter((c) => c.name !== fileName));
+    } catch (err) {
+      console.warn('[usage-meter] delete config failed', err);
+    }
+  };
+
+  /** 处理导入文件：校验导出 JSON，把它作为目标模型的计费配置落盘。 */
+  const handleImportFile = async (ev: { target: { files: FileList | null; value: string } }): Promise<void> => {
+    const t = importTargetRef.current;
+    importTargetRef.current = null;
+    const file = ev.target.files?.[0];
+    ev.target.value = ''; // 允许再次选同一文件
+    if (t === null || file === undefined) return;
+    const k = draftKeyOf(t.provider, t.model);
+    let doc: { __dshUsageMeter?: unknown; prices?: unknown; templateId?: unknown; displayCurrency?: unknown; rows?: unknown };
+    try {
+      doc = JSON.parse(await file.text()) as typeof doc;
+    } catch {
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: L('导入失败') } }));
+      window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 2500);
+      return;
+    }
+    if (doc === null || typeof doc !== 'object' || doc.__dshUsageMeter !== 1 || typeof doc.prices !== 'object' || doc.prices === null) {
+      setSaveStates((s) => ({ ...s, [k]: { ok: false, msg: L('导入文件无效') } }));
+      window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 2500);
+      return;
+    }
+    const body: Record<string, unknown> = {
+      provider: t.provider,
+      model: t.model,
+      prices: doc.prices as Record<string, unknown>,
+      displayCurrency: typeof doc.displayCurrency === 'string' && doc.displayCurrency !== '' ? doc.displayCurrency : 'CNY',
+      templateId: typeof doc.templateId === 'string' ? doc.templateId : '',
+    };
+    if (Array.isArray(doc.rows)) body.rows = doc.rows;
+    let ok = false;
+    try {
+      ok = await persistModel(t.provider, t.model, body);
+    } catch (err) {
+      console.warn('[usage-meter] import billing config failed', err);
+    }
+    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? L('已导入计费配置') : L('导入失败') } }));
+    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 2500);
+  };
+
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
   const label: CSSProperties = { width: 132, minWidth: 132, fontSize: 13, color: t.brand, whiteSpace: 'nowrap' };
   const input: CSSProperties = { flex: 1, maxWidth: 320, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 13, background: t.card, color: t.text };
@@ -1457,6 +1658,13 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                 );
               })()}
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: t.brand, whiteSpace: 'nowrap' }}>{L('计费配置目录')}</span>
+              <input value={configDirInput} onChange={(ev) => setConfigDirInput(ev.target.value)} placeholder={L('默认 $DSH_HOME/usage-meter（留空用默认）')} style={{ flex: 1, minWidth: 180, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 12, background: t.card, color: t.text, boxSizing: 'border-box' }} />
+              <button type="button" onClick={() => void saveBillingConfigDir()} style={{ ...btnSmall }}>{L('保存目录')}</button>
+              {dirMsg !== '' && <span style={{ fontSize: 11, color: t.ok }}>{dirMsg}</span>}
+            </div>
+            <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>{L('导出/导入共用此目录；留空则用默认目录（在 DSH_HOME 下，不随 dsh 升级丢失）。')}</div>
             {modelsLoading ? (
               <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>{L('加载模型目录…')}</div>
             ) : modelDir.length === 0 ? (
@@ -1535,6 +1743,46 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                 )}
                                 {e.noSavedPrice && (
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('noSavedPrice')}</div>
+                                )}
+                                {/* 计费配置导出/导入：把本模型的计费模板复用到另一模型。 */}
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 4 }}>
+                                  <button type="button" onClick={() => void exportModelConfig(active.provider, m.model)} disabled={locked}
+                                    style={{ ...btnSmall, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
+                                    {L('导出计费配置')}
+                                  </button>
+                                  <button type="button" onClick={() => void triggerImport(active.provider, m.model)} disabled={locked}
+                                    style={{ ...btnSmall, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
+                                    {L('导入计费配置')}
+                                  </button>
+                                </div>
+                                {importPickerKey === k && (
+                                  <div style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, padding: 8, marginBottom: 8, background: 'rgba(77,107,254,0.05)' }}>
+                                    <div style={{ fontSize: 11, color: t.brand, marginBottom: 6 }}>
+                                      {L('从计费配置目录导入到本模型：')}{configDir !== '' ? configDir : L('（默认目录）')}
+                                    </div>
+                                    {overrides[draftKeyOf(active.provider, m.model)] !== undefined && (
+                                      <div style={{ fontSize: 11, color: t.error, marginBottom: 6, fontWeight: 600 }}>{L('该模型已有计费配置，导入将覆盖现有模板。')}</div>
+                                    )}
+                                    {dirConfigs.length === 0 && <div style={{ fontSize: 11, color: t.text3, marginBottom: 6 }}>{L('目录为空，请先去其他模型点「导出计费配置」')}</div>}
+                                    {dirConfigs.map((c) => {
+                                      const dup = dirConfigs.filter((x) => x.provider === c.provider && x.model === c.model).length > 1;
+                                      return (
+                                        <div key={c.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
+                                          <span style={{ fontSize: 12, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.provider}/{c.model}
+                                            {dup && <span style={{ fontSize: 10, color: t.error, marginLeft: 6, fontWeight: 600 }}>{L('重复')}</span>}
+                                          </span>
+                                          <span style={{ display: 'flex', gap: 6 }}>
+                                            <button type="button" onClick={() => void importFromDir(active.provider, m.model, c.name)} style={{ ...btnSmall }}>{L('导入')}</button>
+                                            <button type="button" onClick={() => void deleteConfig(c.name)} style={{ ...btnSmall, color: t.error }}>{L('删除')}</button>
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <button type="button" onClick={() => { importTargetRef.current = { provider: active.provider, model: m.model }; fileInputRef.current?.click(); setImportPickerKey(''); }} style={{ ...btnSmall }}>{L('手动选文件…')}</button>
+                                      <span style={{ fontSize: 11, color: t.text3 }}>{L('（跨机器导入用）')}</span>
+                                    </div>
+                                  </div>
                                 )}
                                 <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', columnGap: 12, rowGap: 10, alignItems: 'center' }}>
                                                                   <span style={formLabel}>{tt('currency')}</span>
@@ -1804,6 +2052,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
           <p style={{ color: t.text3, fontSize: 11, marginTop: 12, marginBottom: 0 }}>
             {L('会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。')}
           </p>
+          <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(ev) => void handleImportFile(ev)} />
         </div>
       )}
     </div>
