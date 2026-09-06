@@ -260,6 +260,12 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
   const [rate, setRate] = useState<number | null>(null);
   const rateSamplesRef = useRef<Array<{ at: number; total: number }>>([]);
   const usageRef = useRef<UsageCostValue | undefined>(undefined);
+  // 用量展板（阶段D）：弹窗右上角小图标打开；三种视图来自 /api/usage-meter/stats。
+  const [showDash, setShowDash] = useState(false);
+  const [dashStats, setDashStats] = useState<Array<{ provider: string; model: string; requestCount: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; cost: number; currency: string }>>([]);
+  const [dashView, setDashView] = useState<'all' | 'provider' | 'model'>('all');
+  const [dashProv, setDashProv] = useState('');
+  const [dashModel, setDashModel] = useState('');
 
   useEffect(() => {
     usageRef.current = usage;
@@ -323,9 +329,27 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
   const overBudget = remaining !== null && remaining < 0;
   const budgetRatio =
     usage.budget !== null && usage.budget > 0 ? Math.max(0, Math.min(1, (remaining ?? 0) / usage.budget)) : null;
+  // 预警（阶段C）：预算用到百分比 ≥ 阈值，或实时余额低于阈值下限 → 读数胶囊呼吸色。
+  const alertBudget = usage.budget !== null && usage.budget > 0 && usage.alertBudgetPct > 0 && usage.remainingBudget !== null && ((usage.budget - usage.remainingBudget) / usage.budget) * 100 >= usage.alertBudgetPct;
+  const alertBalance = usage.accountBalance !== null && usage.alertBalanceFloor > 0 && usage.accountBalance.totalBalance < usage.alertBalanceFloor;
+  const breathing = alertBudget || alertBalance;
+
+  const fmtCost = (v: number): string => (Number.isFinite(v) ? `¥${v.toFixed(3)}` : '—');
+  const loadDash = async (): Promise<void> => {
+    try {
+      const res = await fetch('/api/usage-meter/stats');
+      if (!res.ok) return;
+      const doc = (await res.json()) as { stats?: Array<{ provider: string; model: string; requestCount: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; cost: number; currency: string }> };
+      setDashStats(doc.stats ?? []);
+    } catch { /* ignore */ }
+  };
+  const provList = Array.from(new Set(dashStats.map((s) => s.provider)));
+  const modelList = dashProv !== '' ? dashStats.filter((s) => s.provider === dashProv) : dashStats;
+  const totalCost = dashStats.reduce((a, s) => a + s.cost, 0);
 
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
+      <style>{`@keyframes um-breath { 0%,100% { box-shadow: 0 0 4px rgba(240,68,68,0.25), 0 0 0 0 rgba(240,68,68,0.2); border-color: rgba(240,68,68,0.5); } 50% { box-shadow: 0 0 14px rgba(240,68,68,0.75), 0 0 0 4px rgba(240,68,68,0.08); border-color: rgba(240,68,68,0.95); } }`}</style>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -337,15 +361,16 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           gap: 8,
           maxWidth: '100%',
           padding: '2px 8px',
-          border: `1px solid ${open ? 'rgba(77,107,254,0.55)' : 'rgba(77,107,254,0.30)'}`,
+          border: breathing ? '1px solid rgba(240,68,68,0.5)' : `1px solid ${open ? 'rgba(77,107,254,0.55)' : 'rgba(77,107,254,0.30)'}`,
           borderRadius: 999,
-          background: open ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(124,92,255,0.08))' : 'linear-gradient(90deg, rgba(77,107,254,0.10), rgba(124,92,255,0.04))',
+          background: breathing ? 'linear-gradient(90deg, rgba(240,68,68,0.16), rgba(240,68,68,0.06))' : open ? 'linear-gradient(90deg, rgba(77,107,254,0.16), rgba(124,92,255,0.08))' : 'linear-gradient(90deg, rgba(77,107,254,0.10), rgba(124,92,255,0.04))',
           color: t.text2,
           fontSize: 11,
           lineHeight: '16px',
           fontVariantNumeric: 'tabular-nums',
           cursor: 'pointer',
           transition: 'background .12s ease, border-color .12s ease',
+          ...(breathing ? { animation: 'um-breath 1.6s ease-in-out infinite' } : {}),
         }}
       >
         <span style={{ fontWeight: 700, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
@@ -410,8 +435,95 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
         >
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 13, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{usage.model ?? L('未选择模型')}</span>
-            <span style={{ color: t.text3, fontSize: 11 }}>{usage.provider ?? ''}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: t.text3, fontSize: 11 }}>{usage.provider ?? ''}</span>
+              <button type="button" onClick={() => { setShowDash((o) => !o); if (!showDash) void loadDash(); }}
+                title={L('用量展板')}
+                style={{ fontSize: 13, lineHeight: 1, padding: '2px 6px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: showDash ? 'linear-gradient(90deg, #4d6bfe, #7c5cff)' : 'rgba(77,107,254,0.08)', color: showDash ? '#fff' : t.brand, cursor: 'pointer' }}>
+                ▦
+              </button>
+            </span>
           </div>
+          {showDash && (
+            <div style={{ marginTop: 10, borderTop: '1px solid rgba(77,107,254,0.25)', paddingTop: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {([['all', '全部'], ['provider', '按提供商'], ['model', '按模型']] as Array<[string, string]>).map(([id, label]) => (
+                    <button key={id} type="button" onClick={() => { setDashView(id as 'all' | 'provider' | 'model'); if (id === 'provider') setDashProv(provList[0] ?? ''); if (id === 'model') { setDashProv(provList[0] ?? ''); setDashModel(modelList[0]?.model ?? ''); } }}
+                      style={{ padding: '4px 10px', fontSize: 11, borderRadius: 6, border: 'none', borderBottom: dashView === id ? '2px solid #7c5cff' : '2px solid transparent', background: dashView === id ? 'rgba(124,92,255,0.10)' : 'transparent', color: dashView === id ? t.brand : t.text3, fontWeight: 600, cursor: 'pointer' }}>{L(label)}</button>
+                  ))}
+                </div>
+                {totalCost > 0 && <span style={{ fontSize: 12, fontWeight: 700, background: 'linear-gradient(90deg, #4d6bfe, #f59e0b)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{L('累计')} {fmtCost(totalCost)}</span>}
+              </div>
+              {dashStats.length === 0 ? (
+                <div style={{ color: t.text3, fontSize: 11, marginTop: 10 }}>{L('暂无用量数据，先发几条消息再来看。')}</div>
+              ) : dashView === 'all' ? (
+                <div style={{ marginTop: 8 }}>
+                  {dashStats.map((s) => {
+                    const share = totalCost > 0 ? (s.cost / totalCost) * 100 : 0;
+                    return (
+                      <div key={`${s.provider}/${s.model}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                        <span style={{ fontSize: 11, color: t.text, minWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.model}</span>
+                        <div style={{ flex: 1, height: 10, borderRadius: 999, background: t.borderSoft, overflow: 'hidden' }}>
+                          <div style={{ width: `${share}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff, #f59e0b)', transition: 'width .3s ease' }} />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.brand, whiteSpace: 'nowrap' }}>{fmtCost(s.cost)}</span>
+                        <span style={{ fontSize: 10, color: t.text3, whiteSpace: 'nowrap' }}>{share.toFixed(0)}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : dashView === 'provider' ? (
+                <div style={{ marginTop: 8 }}>
+                  {provList.map((p) => {
+                    const items = dashStats.filter((s) => s.provider === p);
+                    const c = items.reduce((a, s) => a + s.cost, 0);
+                    const share = totalCost > 0 ? (c / totalCost) * 100 : 0;
+                    return (
+                      <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                        <span style={{ fontSize: 11, color: t.text, minWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p}</span>
+                        <div style={{ flex: 1, height: 10, borderRadius: 999, background: t.borderSoft, overflow: 'hidden' }}>
+                          <div style={{ width: `${share}%`, height: '100%', borderRadius: 999, background: 'linear-gradient(90deg, #7c5cff, #4d6bfe)', transition: 'width .3s ease' }} />
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: t.brand, whiteSpace: 'nowrap' }}>{fmtCost(c)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <select value={dashProv} onChange={(ev) => { setDashProv(ev.target.value); setDashModel(modelList[0]?.model ?? ''); }} style={{ padding: '4px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 11, background: t.card, color: t.text }}>
+                      {provList.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <select value={dashModel} onChange={(ev) => setDashModel(ev.target.value)} style={{ padding: '4px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 11, background: t.card, color: t.text }}>
+                      {modelList.map((s) => <option key={`${s.provider}/${s.model}`} value={s.model}>{s.model}</option>)}
+                    </select>
+                  </div>
+                  {(() => {
+                    const m = dashStats.find((s) => s.provider === dashProv && s.model === dashModel);
+                    if (m === undefined) return <div style={{ color: t.text3, fontSize: 11 }}>{L('该模型暂无用量')}</div>;
+                    const buckets = [
+                      ['输入', m.inputTokens], ['缓存读', m.cacheReadTokens], ['缓存写', m.cacheWriteTokens], ['输出', m.outputTokens], ['推理', m.reasoningTokens],
+                    ] as Array<[string, number]>;
+                    const tot = m.inputTokens + m.cacheReadTokens + m.cacheWriteTokens + m.outputTokens + m.reasoningTokens;
+                    const colors = ['#4d6bfe', '#7c5cff', '#f59e0b', '#22c55e', '#ef4444'];
+                    return (
+                      <div>
+                        <div style={{ display: 'flex', height: 14, borderRadius: 999, overflow: 'hidden', background: t.borderSoft }}>
+                          {buckets.map(([label, n], i) => tot > 0 && n > 0 ? <div key={label} title={`${label}: ${n}`} style={{ width: `${(n / tot) * 100}%`, background: colors[i % colors.length] }} /> : null)}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 6 }}>
+                          {buckets.map(([label, n], i) => tot > 0 && n > 0 ? <span key={label} style={{ fontSize: 10, color: t.text3 }}>{label} {n}</span> : null)}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: t.brand }}>{L('费用')} {fmtCost(m.cost)} · {L('请求')} {m.requestCount}</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>
             {L('价格来源')} {p?.source === 'remote' ? tt('sourceRemote') : p?.source === 'user' ? tt('sourceUser') : tt('sourceBuiltin')} · {L('更新于')}{' '}
             {p?.updatedAt ? new Date(p.updatedAt).toLocaleString() : '—'}
@@ -557,6 +669,20 @@ type ModelSaveState = { ok: boolean; msg: string };
 
 function draftKeyOf(provider: string, model: string): string {
   return `${provider}/${model}`;
+}
+
+/** 从导出文件名提取重命名版本号：`dsh-billing-x-y (1).json` → `1`；无 → null。 */
+function versionSuffixOf(name: string): string | null {
+  const m = /#(\d+)\b/.exec(name);
+  return m !== null ? m[1] : null;
+}
+
+/** 导出列表用的短时间格式（月-日 时:分）。 */
+function fmtListTime(ms: number): string {
+  if (ms <= 0) return '';
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function isDeepseekRoute(provider: string): boolean {
@@ -832,7 +958,19 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   const [dirConfigs, setDirConfigs] = useState<Array<{ name: string; provider: string; model: string; mtime: number }>>([]);
   const [configDir, setConfigDir] = useState('');
   const [configDirInput, setConfigDirInput] = useState('');
+  const [wrapperMarkersInput, setWrapperMarkersInput] = useState('');
+  const [wmMsg, setWmMsg] = useState('');
   const [dirMsg, setDirMsg] = useState('');
+  const [openStorage, setOpenStorage] = useState(false);
+  const [storageTab, setStorageTab] = useState<'dir' | 'vision' | 'alert'>('dir');
+  const [thrPct, setThrPct] = useState('');
+  const [thrFloor, setThrFloor] = useState('');
+  const [thrMsg, setThrMsg] = useState('');
+  const [dirDelMsg, setDirDelMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  // 导出冲突内联选择：目录里已存在同名配置时，在该模型卡上展开「覆盖 / 重命名」。
+  const [exportConflict, setExportConflict] = useState<{ provider: string; model: string; identical: boolean } | null>(null);
+  const [renameMode, setRenameMode] = useState(false);
+  const [renameName, setRenameName] = useState('');
 
   useEffect(() => {
     void (async () => {
@@ -866,6 +1004,11 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         const get = (v: unknown) => (v === null || v === undefined ? '' : String(v));
         setKeySaved(c.deepseekApiKey === '***');
         setConfigDirInput(typeof (c as Record<string, unknown>).billingConfigDir === 'string' && String((c as Record<string, unknown>).billingConfigDir) !== '' ? String((c as Record<string, unknown>).billingConfigDir) : '');
+        setWrapperMarkersInput(typeof (c as Record<string, unknown>).wrapperMarkers === 'string' ? String((c as Record<string, unknown>).wrapperMarkers) : '');
+        const _cap = (c as Record<string, unknown>).budgetAlertPct;
+        setThrPct(typeof _cap === 'number' && _cap > 0 ? String(_cap) : '');
+        const _caf = (c as Record<string, unknown>).balanceAlertFloor;
+        setThrFloor(typeof _caf === 'number' && _caf > 0 ? String(_caf) : '');
         setOverrides(doc.priceOverrides ?? {});
         setBalances(doc.balances ?? {});
         const sb: Record<string, boolean> = {};
@@ -1325,59 +1468,76 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // 下载。导入：把这份 JSON 应用到目标模型——POST 走 /api/usage-meter/config，
   // 复用 persistModel；导入成功后 overrides 变化触发草稿重播种，目标模型编辑器
   // 自动刷新为导入的模板/价格（含峰谷）。
-  const saveStatus = (k: string, ok: boolean, msg: string): void => {
-    setSaveStates((s) => ({ ...s, [k]: { ok, msg } }));
-    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
+  // 工具栏本地反馈（导出/导入成功与否，显示在「导出计费配置」按钮旁的空白处）。
+  const [barMsg, setBarMsg] = useState<Record<string, { ok: boolean; msg: string } | undefined>>({});
+  const barStatus = (k: string, ok: boolean, msg: string): void => {
+    setBarMsg((s) => ({ ...s, [k]: { ok, msg } }));
+    window.setTimeout(() => setBarMsg((s) => { const n = { ...s }; delete n[k]; return n; }), 3500);
   };
 
   const exportModelConfig = async (provider: string, model: string): Promise<void> => {
     const k = draftKeyOf(provider, model);
+    const probe = await runExport(provider, model, {});
+    if (!probe.ok) { barStatus(k, false, L('导出失败')); return; }
+    if (probe.created === true) { barStatus(k, true, L('已导出到计费配置目录')); return; }
+    // 目录里已存在同名配置：不弹系统窗、不显示裸"失败"——展开内联「覆盖 / 重命名」选择条。
+    setExportConflict({ provider, model, identical: probe.identical === true });
+    setRenameMode(false);
+    const ts = ((): string => { const d = new Date(); const p = (n: number): string => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; })();
+    setRenameName(`dsh-billing-${provider.replace(/[^\w.-]+/g, '_')}-${model.replace(/[^\w.-]+/g, '_')} #1-${ts}.json`);
+  };
+
+  /** 组装某模型的导出文档（模板 + 价格 + 行 + 币种；不含余额）。 */
+  const exportBodyFor = (provider: string, model: string): Record<string, unknown> | null => {
     const body = buildModelBody(provider, model);
-    if (body === null) return;
-    const payload = {
+    if (body === null) return null;
+    return {
       templateId: body.templateId,
       displayCurrency: body.displayCurrency,
       prices: body.prices ?? {},
       ...(Array.isArray(body.rows) ? { rows: body.rows } : {}),
     };
-    const call = async (extra: { fileName?: string; force?: boolean }): Promise<{ ok: boolean; created?: boolean; exists?: boolean; identical?: boolean }> => {
-      try {
-        const res = await fetch('/api/usage-meter/export-config', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ provider, model, ...payload, ...extra }),
-        });
-        if (!res.ok) return { ok: false };
-        return (await res.json().catch(() => ({}))) as { ok: boolean; created?: boolean; exists?: boolean; identical?: boolean };
-      } catch (err) {
-        console.warn('[usage-meter] export billing config failed', err);
-        return { ok: false };
-      }
-    };
-    const base = `dsh-billing-${provider.replace(/[^\w.-]+/g, '_')}-${model.replace(/[^\w.-]+/g, '_')}`;
-    // 1) 先探测存在性/一致性（不写盘）。
-    const probe = await call({});
-    if (!probe.ok) { saveStatus(k, false, L('导出失败')); return; }
-    if (probe.created === true) { saveStatus(k, true, L('已导出到计费配置目录')); return; }
-    if (probe.exists === true && probe.identical === true) { saveStatus(k, false, L('已存在相同配置，未重复导出')); return; }
-    if (probe.exists === true && probe.identical !== true) {
-      // 同名但内容不同 → 覆盖 or 改名。
-      if (window.confirm(L('已存在同名但内容不同的配置，是否覆盖？'))) {
-        const r = await call({ force: true });
-        saveStatus(k, r.ok === true, r.ok === true ? L('已覆盖') : L('导出失败'));
-        return;
-      }
-      const suggested = `${base} (1).json`;
-      const name = window.prompt(L('不覆盖，改用新文件名保存：'), suggested);
-      if (name === null || name.trim() === '') return;
-      const fname = name.trim().endsWith('.json') ? name.trim() : `${name.trim()}.json`;
-      const r = await call({ fileName: fname });
-      if (r.ok === true && r.created === true) { saveStatus(k, true, L('已导出到计费配置目录')); return; }
-      if (r.exists === true) { saveStatus(k, false, L('该文件名已存在，请换名重试')); return; }
-      saveStatus(k, r.ok === true, r.ok === true ? L('已导出到计费配置目录') : L('导出失败'));
-      return;
+  };
+
+  const runExport = async (provider: string, model: string, extra: { fileName?: string; force?: boolean }): Promise<{ ok: boolean; created?: boolean; exists?: boolean; identical?: boolean }> => {
+    const doc = exportBodyFor(provider, model);
+    if (doc === null) return { ok: false };
+    try {
+      const res = await fetch('/api/usage-meter/export-config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, model, ...doc, ...extra }),
+      });
+      if (!res.ok) return { ok: false };
+      return (await res.json().catch(() => ({}))) as { ok: boolean; created?: boolean; exists?: boolean; identical?: boolean };
+    } catch (err) {
+      console.warn('[usage-meter] export failed', err);
+      return { ok: false };
     }
-    saveStatus(k, false, L('导出失败'));
+  };
+
+  const closeExportConflict = (): void => { setExportConflict(null); setRenameMode(false); };
+
+  /** 「覆盖现有模板」：强制写回同名文件。 */
+  const confirmOverwriteExport = async (): Promise<void> => {
+    const c = exportConflict;
+    if (c === null) return;
+    const r = await runExport(c.provider, c.model, { force: true });
+    barStatus(draftKeyOf(c.provider, c.model), r.ok === true, r.ok === true ? L('已覆盖') : L('导出失败'));
+    closeExportConflict();
+  };
+
+  /** 「重命名保存」：按输入的新文件名保存；名字已存在则提示并保持面板。 */
+  const confirmRenameExport = async (): Promise<void> => {
+    const c = exportConflict;
+    if (c === null) return;
+    const fname = renameName.trim().endsWith('.json') ? renameName.trim() : `${renameName.trim()}.json`;
+    const r = await runExport(c.provider, c.model, { fileName: fname });
+    const k = draftKeyOf(c.provider, c.model);
+    if (r.ok === true && r.created === true) { barStatus(k, true, L('已导出到计费配置目录')); closeExportConflict(); return; }
+    if (r.exists === true) { barStatus(k, false, L('该文件名已存在，请换名重试')); return; }
+    barStatus(k, r.ok === true, r.ok === true ? L('已导出到计费配置目录') : L('导出失败'));
+    closeExportConflict();
   };
 
   /** 触发导入：打开目录导入面板（列目录里的计费配置 + 手动选文件）。模型中则拒绝。 */
@@ -1415,8 +1575,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     } catch (err) {
       console.warn('[usage-meter] import-from-dir failed', err);
     }
-    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? L('已导入计费配置') : L('导入失败') } }));
-    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 3000);
+    barStatus(k, ok, ok ? L('已导入计费配置') : L('导入失败'));
     setImportPickerKey('');
   };
 
@@ -1458,17 +1617,65 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   };
 
   /** 一键删除目录里某条已导出的计费配置。 */
+  /** 保存「视觉包装识别标记」（每行一个；留空 = 关闭识别），经 config POST 落盘。 */
+  const saveWrapperMarkers = async (): Promise<void> => {
+    setWmMsg('');
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wrapperMarkers: wrapperMarkersInput.trim() }),
+      });
+      setWmMsg(res.ok ? L('已保存识别标记') : L('保存失败'));
+    } catch (err) {
+      console.warn('[usage-meter] save wrapperMarkers failed', err);
+      setWmMsg(L('保存失败'));
+    }
+    window.setTimeout(() => setWmMsg(''), 3000);
+  };
+
+  /** 保存全局预警阈值（预算% / 余额下限），经 config POST 落盘。 */
+  const saveGlobalThreshold = async (): Promise<void> => {
+    setThrMsg('');
+    const pct = Number(thrPct);
+    const floor = Number(thrFloor);
+    const body: Record<string, unknown> = {};
+    if (!Number.isNaN(pct) && pct >= 0) body.budgetAlertPct = pct;
+    if (!Number.isNaN(floor) && floor >= 0) body.balanceAlertFloor = floor;
+    try {
+      const res = await fetch('/api/usage-meter/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      setThrMsg(res.ok ? L('已保存全局阈值') : L('保存失败'));
+    } catch (err) {
+      console.warn('[usage-meter] save global threshold failed', err);
+      setThrMsg(L('保存失败'));
+    }
+    window.setTimeout(() => setThrMsg(''), 3000);
+  };
+
   const deleteConfig = async (fileName: string): Promise<void> => {
+    if (!window.confirm(L('确定删除该计费配置？'))) return;
+    let ok = false;
     try {
       const res = await fetch('/api/usage-meter/delete-config', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ fileName }),
       });
-      if (res.ok) setDirConfigs((s) => s.filter((c) => c.name !== fileName));
+      ok = res.ok;
     } catch (err) {
       console.warn('[usage-meter] delete config failed', err);
     }
+    if (ok) {
+      setDirConfigs((s) => s.filter((c) => c.name !== fileName));
+      setDirDelMsg({ ok: true, msg: L('已删除') });
+    } else {
+      setDirDelMsg({ ok: false, msg: L('删除失败') });
+    }
+    window.setTimeout(() => setDirDelMsg(null), 3500);
   };
 
   /** 处理导入文件：校验导出 JSON，把它作为目标模型的计费配置落盘。 */
@@ -1506,8 +1713,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     } catch (err) {
       console.warn('[usage-meter] import billing config failed', err);
     }
-    setSaveStates((s) => ({ ...s, [k]: { ok, msg: ok ? L('已导入计费配置') : L('导入失败') } }));
-    window.setTimeout(() => setSaveStates((s) => { const n = { ...s }; delete n[k]; return n; }), 2500);
+    barStatus(k, ok, ok ? L('已导入计费配置') : L('导入失败'));
   };
 
   const field: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0' };
@@ -1658,13 +1864,6 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                 );
               })()}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: t.brand, whiteSpace: 'nowrap' }}>{L('计费配置目录')}</span>
-              <input value={configDirInput} onChange={(ev) => setConfigDirInput(ev.target.value)} placeholder={L('默认 $DSH_HOME/usage-meter（留空用默认）')} style={{ flex: 1, minWidth: 180, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 12, background: t.card, color: t.text, boxSizing: 'border-box' }} />
-              <button type="button" onClick={() => void saveBillingConfigDir()} style={{ ...btnSmall }}>{L('保存目录')}</button>
-              {dirMsg !== '' && <span style={{ fontSize: 11, color: t.ok }}>{dirMsg}</span>}
-            </div>
-            <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>{L('导出/导入共用此目录；留空则用默认目录（在 DSH_HOME 下，不随 dsh 升级丢失）。')}</div>
             {modelsLoading ? (
               <div style={{ color: t.text3, fontSize: 12, marginTop: 8 }}>{L('加载模型目录…')}</div>
             ) : modelDir.length === 0 ? (
@@ -1724,7 +1923,14 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                             {/* 折叠头部 */}
                             <button
                               type="button"
-                              onClick={() => setExpanded((s) => ({ ...s, [k]: !isOpen }))}
+                              onClick={() => {
+                                // 折叠该模型卡时，一并收起它打开的导入列表 / 导出冲突选择条。
+                                if (isOpen) {
+                                  if (importPickerKey === k) setImportPickerKey('');
+                                  if (exportConflict !== null && exportConflict.provider === active.provider && exportConflict.model === m.model) closeExportConflict();
+                                }
+                                setExpanded((s) => ({ ...s, [k]: !isOpen }));
+                              }}
                               style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' as const, padding: '8px 12px', fontSize: 13, fontWeight: 600, border: 'none', background: isOpen ? 'linear-gradient(90deg, rgba(77,107,254,0.22), rgba(124,92,255,0.08))' : 'rgba(77,107,254,0.05)', color: t.text, cursor: 'pointer', borderBottom: isOpen ? '1px solid rgba(77,107,254,0.15)' : 'none' }}
                             >
                               <span style={{ fontSize: 10, color: t.brand }}>{isOpen ? '▼' : '▶'}</span>
@@ -1745,7 +1951,10 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                   <div style={{ color: t.error, fontSize: 11, lineHeight: 1.4 }}>{tt('noSavedPrice')}</div>
                                 )}
                                 {/* 计费配置导出/导入：把本模型的计费模板复用到另一模型。 */}
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 4 }}>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                  {barMsg[k] !== undefined && (
+                                    <span style={{ marginRight: 'auto', fontSize: 11, fontWeight: 600, color: barMsg[k]!.ok ? t.ok : t.error, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{barMsg[k]!.msg}</span>
+                                  )}
                                   <button type="button" onClick={() => void exportModelConfig(active.provider, m.model)} disabled={locked}
                                     style={{ ...btnSmall, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
                                     {L('导出计费配置')}
@@ -1755,6 +1964,29 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     {L('导入计费配置')}
                                   </button>
                                 </div>
+                                {exportConflict !== null && exportConflict.provider === active.provider && exportConflict.model === m.model && (
+                                  <div style={{ border: '1px solid rgba(240, 68, 68, 0.4)', borderRadius: 8, padding: 8, marginBottom: 8, background: 'rgba(240, 68, 68, 0.05)' }}>
+                                    <div style={{ fontSize: 11, color: t.error, marginBottom: 6, fontWeight: 600 }}>
+                                      {L('已存在同名配置')}（{exportConflict.identical ? L('内容相同') : L('内容不同')}）— {L('请选择：')}
+                                    </div>
+                                    {!renameMode ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <button type="button" onClick={() => void confirmOverwriteExport()}
+                                          style={{ ...btnSmall, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', border: 'none', fontWeight: 600 }}>{L('覆盖现有模板')}</button>
+                                        <button type="button" onClick={() => setRenameMode(true)} style={{ ...btnSmall }}>{L('重命名保存')}</button>
+                                        <button type="button" onClick={closeExportConflict} title={L('取消')} style={{ ...btnSmall, color: t.text3 }}>✕</button>
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <input value={renameName} onChange={(ev) => setRenameName(ev.target.value)} autoFocus
+                                          style={{ flex: 1, minWidth: 200, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 12, background: t.card, color: t.text, boxSizing: 'border-box' }} />
+                                        <button type="button" onClick={() => void confirmRenameExport()}
+                                          style={{ ...btnSmall, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', border: 'none', fontWeight: 600 }}>{L('确认保存')}</button>
+                                        <button type="button" onClick={closeExportConflict} title={L('取消')} style={{ ...btnSmall, color: t.text3 }}>✕</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                                 {importPickerKey === k && (
                                   <div style={{ border: '1px solid rgba(77,107,254,0.35)', borderRadius: 8, padding: 8, marginBottom: 8, background: 'rgba(77,107,254,0.05)' }}>
                                     <div style={{ fontSize: 11, color: t.brand, marginBottom: 6 }}>
@@ -1763,21 +1995,27 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                                     {overrides[draftKeyOf(active.provider, m.model)] !== undefined && (
                                       <div style={{ fontSize: 11, color: t.error, marginBottom: 6, fontWeight: 600 }}>{L('该模型已有计费配置，导入将覆盖现有模板。')}</div>
                                     )}
+                                    {dirDelMsg !== null && <div style={{ fontSize: 11, color: dirDelMsg.ok ? t.ok : t.error, marginBottom: 6 }}>{dirDelMsg.msg}</div>}
                                     {dirConfigs.length === 0 && <div style={{ fontSize: 11, color: t.text3, marginBottom: 6 }}>{L('目录为空，请先去其他模型点「导出计费配置」')}</div>}
-                                    {dirConfigs.map((c) => {
-                                      const dup = dirConfigs.filter((x) => x.provider === c.provider && x.model === c.model).length > 1;
-                                      return (
-                                        <div key={c.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
-                                          <span style={{ fontSize: 12, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.provider}/{c.model}
-                                            {dup && <span style={{ fontSize: 10, color: t.error, marginLeft: 6, fontWeight: 600 }}>{L('重复')}</span>}
-                                          </span>
-                                          <span style={{ display: 'flex', gap: 6 }}>
-                                            <button type="button" onClick={() => void importFromDir(active.provider, m.model, c.name)} style={{ ...btnSmall }}>{L('导入')}</button>
-                                            <button type="button" onClick={() => void deleteConfig(c.name)} style={{ ...btnSmall, color: t.error }}>{L('删除')}</button>
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
+                                    {dirConfigs.map((c) => (
+                                      <div key={c.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
+                                        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+    {c.provider}/{c.model}
+    {versionSuffixOf(c.name) !== null && (
+      <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 4, background: 'rgba(124,92,255,0.14)', color: '#7c5cff', fontWeight: 600 }}>#{versionSuffixOf(c.name)}</span>
+    )}
+  </span>
+  <span style={{ fontSize: 10, color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+    {fmtListTime(c.mtime)}
+  </span>
+</span>
+                                        <span style={{ display: 'flex', gap: 6 }}>
+                                          <button type="button" onClick={() => void importFromDir(active.provider, m.model, c.name)} style={{ ...btnSmall }}>{L('导入')}</button>
+                                          <button type="button" onClick={() => void deleteConfig(c.name)} style={{ ...btnSmall, color: t.error }}>{L('删除')}</button>
+                                        </span>
+                                      </div>
+                                    ))}
                                     <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <button type="button" onClick={() => { importTargetRef.current = { provider: active.provider, model: m.model }; fileInputRef.current?.click(); setImportPickerKey(''); }} style={{ ...btnSmall }}>{L('手动选文件…')}</button>
                                       <span style={{ fontSize: 11, color: t.text3 }}>{L('（跨机器导入用）')}</span>
@@ -2049,6 +2287,73 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
             )}
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', marginTop: 12 }}>
+            <button type="button" onClick={() => setOpenStorage((o) => !o)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(77,107,254,0.35)', background: 'rgba(77,107,254,0.06)', color: t.brand, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 9, transform: openStorage ? 'rotate(90deg)' : 'none', transition: 'transform .12s ease' }}>▶</span>
+              {L('其他设置')}
+            </button>
+          </div>
+          {openStorage && (
+            <div style={{ marginTop: 8 }}>
+              {/* 选项卡：目录导出 / 视觉识别（参考 dsh-ears 分功能区的成熟写法） */}
+              <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid rgba(77,107,254,0.2)', marginBottom: 10 }}>
+                {([['dir', '目录导出'], ['vision', '视觉识别'], ['alert', '预警']] as Array<[string, string]>).map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setStorageTab(id as 'dir' | 'vision' | 'alert')}
+                    style={{ padding: '5px 12px', fontSize: 12, borderRadius: '6px 6px 0 0', border: 'none', borderBottom: storageTab === id ? '2px solid #7c5cff' : '2px solid transparent', background: storageTab === id ? 'rgba(124,92,255,0.10)' : 'transparent', color: storageTab === id ? t.brand : t.text3, fontWeight: 600, cursor: 'pointer' }}>
+                    {L(label)}
+                  </button>
+                ))}
+              </div>
+              {storageTab === 'dir' && (
+                <div>
+                  <div style={{ fontSize: 11, color: t.text3, marginBottom: 2 }}>{L('说明：仅当你手动点「导出计费配置」时，配置才会写入下面这个目录；模型本身不会自动保存到这里。导入时也从这里读取。')}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: t.brand, whiteSpace: 'nowrap' }}>{L('计费配置导出目录')}</span>
+                    <input value={configDirInput} onChange={(ev) => setConfigDirInput(ev.target.value)} placeholder={L('默认 $DSH_HOME/usage-meter（留空用默认）')} style={{ flex: 1, minWidth: 180, padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 12, background: t.card, color: t.text, boxSizing: 'border-box' }} />
+                    <button type="button" onClick={() => void saveBillingConfigDir()} style={{ ...btnSmall }}>{L('保存目录')}</button>
+                    {dirMsg !== '' && <span style={{ fontSize: 11, color: t.ok }}>{dirMsg}</span>}
+                  </div>
+                  <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>{L('导出/导入共用此目录；留空则用默认目录（在 DSH_HOME 下，不随 dsh 升级丢失）。')}</div>
+                </div>
+              )}
+              {storageTab === 'vision' && (
+                <div style={{ border: '1px solid rgba(124,92,255,0.25)', borderRadius: 8, padding: '8px 10px', background: 'rgba(124,92,255,0.04)' }}>
+                  <div style={{ fontSize: 12, color: t.brand, fontWeight: 600, marginBottom: 4 }}>{L('视觉包装识别（模型名前缀/后缀）')}</div>
+                  <div style={{ color: t.text3, fontSize: 11, marginBottom: 6, lineHeight: 1.5 }}>
+                    {L('视觉插件会给模型名加包装标记（如 DeepSeek-V4-Flash (modlens vision)）。命中时按去掉包装后的底层模型计费与聚合，价格/用量与底层模型共用。每行一个标记；留空 = 关闭识别。')}
+                  </div>
+                  <textarea value={wrapperMarkersInput} onChange={(ev) => setWrapperMarkersInput(ev.target.value)} rows={3}
+                    placeholder={' (modlens vision)\n (vision)\n-vision\nvision-toolkit-'}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', border: '1px solid rgba(77,107,254,0.35)', borderRadius: 6, fontSize: 12, background: t.card, color: t.text, fontFamily: 'inherit', resize: 'vertical' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                    <button type="button" onClick={() => void saveWrapperMarkers()}
+                      style={{ ...btnSmall, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', border: 'none', fontWeight: 600 }}>{L('保存识别标记')}</button>
+                    {wmMsg !== '' && <span style={{ fontSize: 11, color: t.ok }}>{wmMsg}</span>}
+                  </div>
+                </div>
+              )}
+              {storageTab === 'alert' && (
+                <div>
+                  <div style={{ fontSize: 11, color: t.text3, marginBottom: 6, lineHeight: 1.5 }}>
+                    {L('设置预警阈值：预算用到指定百分比、或实时余额低于下限时，输入框旁的量用药丸会呼吸变红提醒。模型/供应商可各自覆盖全局。')}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: t.brand, whiteSpace: 'nowrap' }}>{L('全局预算预警%')}</span>
+                    <input value={thrPct} onChange={(ev) => setThrPct(ev.target.value)} placeholder={L('如 80（0=关闭）')} style={ctl({ width: 90 })} />
+                    <span style={{ fontSize: 12, color: t.brand, whiteSpace: 'nowrap' }}>{L('余额预警下限')}</span>
+                    <input value={thrFloor} onChange={(ev) => setThrFloor(ev.target.value)} placeholder={L('如 20（0=关闭）')} style={ctl({ width: 90 })} />
+                    <button type="button" onClick={() => void saveGlobalThreshold()}
+                      style={{ ...btnSmall, background: 'linear-gradient(90deg, #4d6bfe, #7c5cff)', color: '#ffffff', border: 'none', fontWeight: 600 }}>{L('保存全局阈值')}</button>
+                    {thrMsg !== '' && <span style={{ fontSize: 11, color: t.ok }}>{thrMsg}</span>}
+                  </div>
+                  <div style={{ color: t.text3, fontSize: 11, lineHeight: 1.5 }}>
+                    {L('按模型/供应商单独设置阈值：在模型卡「供应商」下拉选好模型后，点开「其他设置 → 预警」可给当前模型设独立阈值（默认遵循全局）。')}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <p style={{ color: t.text3, fontSize: 11, marginTop: 12, marginBottom: 0 }}>
             {L('会话级单价、计费方式与峰谷价在「对话 · 用量卡片 → 用户自定义设置」中编辑。')}
           </p>

@@ -169,6 +169,10 @@ export interface UsageCostValue {
     budget: number | null;
     /** `budget - estimatedCost`; null when no budget is set (may be negative). */
     remainingBudget: number | null;
+    /** 生效的预算告警阈值（% 使用到 budget，0 = 关闭）。 */
+    alertBudgetPct: number;
+    /** 生效的余额告警下限（余额低于该值预警，0 = 关闭）。 */
+    alertBalanceFloor: number;
 }
 declare module '@deepseek-ai/dsh-session-projection/types' {
     interface SessionProjectionMap {

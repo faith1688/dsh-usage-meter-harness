@@ -117,6 +117,16 @@ export class PriceTable {
     for (const [key, value] of Object.entries(rows)) this.rows.set(key as PriceKey, value);
   }
 
+  /** Read-only iteration over all `provider/model` keys (for alias/canonical matching). */
+  entries(): Array<{ key: string; provider: string; model: string; value: ModelPricing }> {
+    const out: Array<{ key: string; provider: string; model: string; value: ModelPricing }> = [];
+    for (const [key, value] of this.rows) {
+      const slash = key.indexOf('/');
+      out.push({ key, provider: slash < 0 ? '' : key.slice(0, slash), model: slash < 0 ? '' : key.slice(slash + 1), value });
+    }
+    return out;
+  }
+
   get size(): number {
     return this.rows.size;
   }

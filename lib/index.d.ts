@@ -44,6 +44,13 @@ declare const Config: z<Schemastery.ObjectS<{
     /** Server-side directory for exported/imported billing configs
      *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
     billingConfigDir: z<string, string>;
+    /** 包装标记（视觉插件加在模型/提供商名上的前后缀），逗号/换行分隔；
+     *  命中则把该模型按底层模型计费/聚合。默认覆盖常见视觉包装。 */
+    wrapperMarkers: z<string, string>;
+    /** 全局预算告警阈值（% 使用到 budget 的多少时预警，0/diff 关闭）。 */
+    budgetAlertPct: z<number, number>;
+    /** 全局余额告警下限（余额低于该金额预警；0 = 关闭）。 */
+    balanceAlertFloor: z<number, number>;
 }>, Schemastery.ObjectT<{
     /** Display / ledger currency (CNY default; USD via the popup). */
     currency: z<string, string>;
@@ -60,6 +67,13 @@ declare const Config: z<Schemastery.ObjectS<{
     /** Server-side directory for exported/imported billing configs
      *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
     billingConfigDir: z<string, string>;
+    /** 包装标记（视觉插件加在模型/提供商名上的前后缀），逗号/换行分隔；
+     *  命中则把该模型按底层模型计费/聚合。默认覆盖常见视觉包装。 */
+    wrapperMarkers: z<string, string>;
+    /** 全局预算告警阈值（% 使用到 budget 的多少时预警，0/diff 关闭）。 */
+    budgetAlertPct: z<number, number>;
+    /** 全局余额告警下限（余额低于该金额预警；0 = 关闭）。 */
+    balanceAlertFloor: z<number, number>;
 }>>;
 /** Stable Cordis plugin name. */
 export declare const name = "usage-meter";
@@ -394,6 +408,8 @@ declare const usageCostProjection: {
             }>>>;
             budget: zod.ZodNullable<zod.ZodNumber>;
             remainingBudget: zod.ZodNullable<zod.ZodNumber>;
+            alertBudgetPct: zod.ZodCatch<zod.ZodNumber>;
+            alertBalanceFloor: zod.ZodCatch<zod.ZodNumber>;
         }, zod.core.$strict>;
         view(state: FoldState): UsageCostValue;
     };

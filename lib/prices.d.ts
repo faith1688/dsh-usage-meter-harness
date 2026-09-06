@@ -24,6 +24,13 @@ export declare class PriceTable {
     removeRaw(key: string): void;
     /** Merge a full set of rows (remote refresh / user override), keeping others. */
     merge(rows: Record<PriceKey, ModelPricing>): void;
+    /** Read-only iteration over all `provider/model` keys (for alias/canonical matching). */
+    entries(): Array<{
+        key: string;
+        provider: string;
+        model: string;
+        value: ModelPricing;
+    }>;
     get size(): number;
 }
 /** The process-wide table the projection `view` reads; the service mutates it. */

@@ -61,6 +61,13 @@ const Config = z.object({
   /** Server-side directory for exported/imported billing configs
    *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
   billingConfigDir: z.string().default(''),
+  /** 包装标记（视觉插件加在模型/提供商名上的前后缀），逗号/换行分隔；
+   *  命中则把该模型按底层模型计费/聚合。默认覆盖常见视觉包装。 */
+  wrapperMarkers: z.string().default(' (modlens vision)\n (vision)\n-vision\nvision-toolkit-'),
+  /** 全局预算告警阈值（% 使用到 budget 的多少时预警，0/diff 关闭）。 */
+  budgetAlertPct: z.number().default(0),
+  /** 全局余额告警下限（余额低于该金额预警；0 = 关闭）。 */
+  balanceAlertFloor: z.number().default(0),
 });
 
 /** Stable Cordis plugin name. */
@@ -77,6 +84,8 @@ const runtimeConfig: {
   currency: string;
   initialBalance: number | null;
   budget: number | null;
+  budgetAlertPct: number;
+  balanceAlertFloor: number;
   priceSourceUrl?: string;
   refreshIntervalMs?: number;
   deepseekApiKey?: string;
@@ -86,6 +95,8 @@ const runtimeConfig: {
   currency: 'CNY',
   initialBalance: null,
   budget: null,
+  budgetAlertPct: 0,
+  balanceAlertFloor: 0,
 };
 
 /** Latest DeepSeek account-balance snapshot, surfaced through the projection. */
@@ -165,6 +176,56 @@ const RATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const providerConfigs: Record<string, { currency?: string; sharedBalance?: boolean }> = {};
 const balances: Record<string, { balance: number; currency: string }> = {};
+/** 预警阈值：`p:<provider>` 供应商级，`m:<provider>/<model>` 模型级（含 followProvider）。 */
+const thresholds: Record<string, ThreshDef> = {};
+
+/** 用量看板聚合：按 (底层 provider, model) 累计真实 token/费用（只读会话事件，不碰计费/余额）。 */
+interface StatsBucket { provider: string; model: string; requestCount: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; cost: number; currency: string; updatedAt: number }
+const stats: Record<string, StatsBucket> = {};
+const lastStatsBySession = new WeakMap<object, { provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>();
+let statsDirty = false;
+function statsPath(): string { return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'usage-meter', 'stats.json'); }
+function saveStats(): void {
+  if (!statsDirty) return;
+  statsDirty = false;
+  try { writeFileSync(statsPath(), JSON.stringify(stats, null, 2), 'utf8'); } catch { /* ignore */ }
+}
+function loadStats(): void {
+  try {
+    const p = statsPath();
+    if (!existsSync(p)) return;
+    const doc = JSON.parse(readFileSync(p, 'utf8')) as Record<string, StatsBucket>;
+    for (const [k, v] of Object.entries(doc)) if (v !== null && typeof v === 'object') stats[k] = v;
+  } catch { /* ignore */ }
+}
+
+interface ThreshDef { budgetAlertPct?: number; balanceAlertFloor?: number; followProvider?: boolean }
+interface ResolvedThresh { budgetAlertPct: number; balanceAlertFloor: number }
+
+/** 解析某 (provider, model) 生效的预警阈值：模型（且 not followProvider）→ 供应商 → 全局。 */
+function resolveThreshold(provider: string | null, model: string | null, cfg: Record<string, unknown>): ResolvedThresh {
+  const globalPct = typeof cfg.budgetAlertPct === 'number' && cfg.budgetAlertPct > 0 ? cfg.budgetAlertPct : 0;
+  const globalFloor = typeof cfg.balanceAlertFloor === 'number' && cfg.balanceAlertFloor > 0 ? cfg.balanceAlertFloor : 0;
+  let modelDef: ThreshDef | undefined;
+  if (provider !== null && model !== null) {
+    const mk = `m:${provider}/${model}`;
+    const alias = aliasOf(provider, model, activeWrapperMarkers);
+    const key2 = alias !== null ? mk : mk; // 保持原 key（包装模型由 pricingFor/显示处理，这里按原 key 匹配）
+    modelDef = thresholds[mk] ?? thresholds[key2];
+    if (modelDef !== undefined && modelDef.followProvider === true) modelDef = undefined;
+  }
+  if (modelDef !== undefined) {
+    return { budgetAlertPct: typeof modelDef.budgetAlertPct === 'number' && modelDef.budgetAlertPct > 0 ? modelDef.budgetAlertPct : 0, balanceAlertFloor: typeof modelDef.balanceAlertFloor === 'number' && modelDef.balanceAlertFloor > 0 ? modelDef.balanceAlertFloor : 0 };
+  }
+  const real = underlyingProvider(provider) ?? provider;
+  if (real !== null) {
+    const pth = thresholds[`p:${real}`];
+    if (pth !== undefined) {
+      return { budgetAlertPct: typeof pth.budgetAlertPct === 'number' && pth.budgetAlertPct > 0 ? pth.budgetAlertPct : 0, balanceAlertFloor: typeof pth.balanceAlertFloor === 'number' && pth.balanceAlertFloor > 0 ? pth.balanceAlertFloor : 0 };
+    }
+  }
+  return { budgetAlertPct: globalPct, balanceAlertFloor: globalFloor };
+}
 /** Per-session last usage sample (turn/step) — used to compute delta deductions. */
 const lastUsageBySession = new WeakMap<object, { turn: number; step: number; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>();
 /** Per-session request (step) start time, mirroring the fold's `stepStart` for the live ledger path. */
@@ -339,6 +400,8 @@ interface ExtraStateDoc {
   providers?: Record<string, { currency?: string; sharedBalance?: boolean; initialBalance?: number; topUps?: Array<{ amount: number }> }>;
   priceOverrides?: Record<string, { prices?: Partial<ModelPricing>; rows?: BillingRow[] }>;
   balances?: Record<string, { balance: number; currency: string }>;
+  /** 预警阈值：`p:<provider>` 供应商级，`m:<provider>/<model>` 模型级（含 followProvider）。 */
+  thresholds?: Record<string, ThreshDef>;
   globals?: PersistedGlobals;
 }
 
@@ -386,6 +449,7 @@ function loadPersistedConfig(): void {
       applyPriceOverrides();
     }
     if (doc.balances) Object.assign(balances, doc.balances);
+    if (doc.thresholds) Object.assign(thresholds, doc.thresholds);
   } catch {
     // ignore
   }
@@ -409,7 +473,7 @@ function savePersistedConfig(): void {
       globals.deepseekApiKeyEnc = enc;
     }
     if (currentPrices.usdToCny > 0) { globals.usdToCny = currentPrices.usdToCny; globals.rateFetchedAt = lastRateFetchedAt; }
-    const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances, globals };
+    const payload: ExtraStateDoc = { providers: providerConfigs, priceOverrides, balances, thresholds, globals };
     writeFileSync(configPath(), JSON.stringify(payload, null, 2), 'utf8');
   } catch (err) {
     console.warn('[usage-meter] failed to persist config:', err);
@@ -515,6 +579,38 @@ function underlyingProvider(provider: string | null): string | null {
   return p;
 }
 
+// ── 包装标记 / 模型别名识别（视觉插件把模型名包上后缀/前缀，如
+//   `DeepSeek-V4-Flash (modlens vision)` ≡ `deepseek-v4-flash`）。
+//   只在检测到包装标记时启用规范化，非包装模型走原路径、零改动。
+let activeWrapperMarkers: string[] = [' (modlens vision)', ' (vision)', '-vision', 'vision-toolkit-'];
+function wrapperMarkerList(cfg: Record<string, unknown>): string[] {
+  const raw = typeof cfg.wrapperMarkers === 'string' && cfg.wrapperMarkers.trim() !== '' ? cfg.wrapperMarkers : ' (modlens vision)\n (vision)\n-vision\nvision-toolkit-';
+  return raw.split(/[\n,]/).map((s) => s.trim()).filter((s) => s !== '');
+}
+/** 剥离已知包装标记（前缀或后缀，大小写不敏感）；返回剥后名字。 */
+function stripWrappers(name: string, markers: string[]): string {
+  let out = name.trim();
+  for (const m of markers) {
+    if (m === '') continue;
+    const lo = out.toLowerCase(); const lm = m.toLowerCase();
+    if (lo.startsWith(lm)) { out = out.slice(m.length).trim(); }
+    else if (lo.endsWith(lm)) { out = out.slice(0, Math.max(0, out.length - m.length)).trim(); }
+  }
+  return out;
+}
+/** 大小写 + 分隔符无关的规范键（DeepSeek V4 Flash ≡ deepseek-v4-flash ≡ DeepSeekV4Flash）。 */
+function canonicalId(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+/** 检测 provider/model 是否带包装标记；有 → 返回底层 (provider, model)；无 → null。 */
+function aliasOf(provider: string | null, model: string | null, markers: string[]): { provider: string; model: string } | null {
+  if (provider === null || model === null || markers.length === 0) return null;
+  const p1 = stripWrappers(provider, markers);
+  const m1 = stripWrappers(model, markers);
+  const changed = canonicalId(p1) !== canonicalId(provider) || canonicalId(m1) !== canonicalId(model);
+  return changed ? { provider: p1, model: m1 } : null;
+}
+
 function isDeepSeekProvider(provider: string | null): boolean {
   const real = underlyingProvider(provider);
   if (real === null) return false;
@@ -584,7 +680,20 @@ function usageEventOf(event: { type: string; data: Record<string, unknown> }): {
 function pricingFor(provider: string | null, model: string | null, at?: number): ModelPricing | null {
   if (provider === null || model === null) return null;
   const tableProvider = underlyingProvider(provider) ?? provider;
-  const raw = currentPrices.table.get(tableProvider, model);
+  let raw = currentPrices.table.get(tableProvider, model);
+  // 包装模型兜底：原始名无价（视觉插件把模型名包了前后缀）→ 用规范键在价表里
+  // 找到底层模型的价格。非包装模型 price 命中原路径时永不进入（零改动）。
+  if (raw === undefined) {
+    const alias = aliasOf(provider, model, activeWrapperMarkers);
+    if (alias !== null) {
+      const want = `${canonicalId(underlyingProvider(alias.provider) ?? alias.provider)}/${canonicalId(alias.model)}`;
+      for (const e of currentPrices.table.entries()) {
+        if (e.model === '' || e.model === '*') continue;
+        const eKey = `${canonicalId(underlyingProvider(e.provider) ?? e.provider)}/${canonicalId(e.model)}`;
+        if (eKey === want) { raw = e.value; break; }
+      }
+    }
+  }
   if (raw === undefined) return null;
   const resolved = resolvePricingForTime(raw, at ?? Date.now());
   const updatedAt = currentPrices.updatedAt > 0 ? currentPrices.updatedAt : resolved.updatedAt;
@@ -679,6 +788,8 @@ const usageCostSchema = zod
     peakState: zod.enum(['peak', 'off']).nullable().catch(null),
     budget: zod.number().nullable(),
     remainingBudget: zod.number().nullable(),
+    alertBudgetPct: zod.number().catch(0),
+    alertBalanceFloor: zod.number().catch(0),
   })
   .strict();
 
@@ -783,6 +894,8 @@ function emptyUsageCost(state: FoldState): UsageCostValue {
     peakState: null,
     budget: safeBudget,
     remainingBudget: safeBudget === null ? null : safeBudget,
+    alertBudgetPct: 0,
+    alertBalanceFloor: 0,
   };
 }
 // The persisted fold-state schema. `stateSchema` is REQUIRED by the framework:
@@ -1061,6 +1174,8 @@ const usageCostProjection = {
       peakState,
       budget,
       remainingBudget: budget === null ? null : safeNumber(budget - estimatedCost, 0),
+      alertBudgetPct: resolveThreshold(state.provider, state.model, runtimeConfig as unknown as Record<string, unknown>).budgetAlertPct,
+      alertBalanceFloor: resolveThreshold(state.provider, state.model, runtimeConfig as unknown as Record<string, unknown>).balanceAlertFloor,
     };
     } catch {
       return emptyUsageCost(state);
@@ -1088,9 +1203,12 @@ class UsageMeterCore {
 
   applyConfig(cfg: Record<string, unknown>): void {
     this.cfg = cfg;
+    activeWrapperMarkers = wrapperMarkerList(cfg);
     runtimeConfig.currency = (cfg.currency as string) ?? 'CNY';
     runtimeConfig.initialBalance = typeof cfg.initialBalance === 'number' && cfg.initialBalance > 0 ? cfg.initialBalance : null;
     runtimeConfig.budget = typeof cfg.budget === 'number' && cfg.budget > 0 ? cfg.budget : null;
+    runtimeConfig.budgetAlertPct = typeof cfg.budgetAlertPct === 'number' && cfg.budgetAlertPct > 0 ? cfg.budgetAlertPct : 0;
+    runtimeConfig.balanceAlertFloor = typeof cfg.balanceAlertFloor === 'number' && cfg.balanceAlertFloor > 0 ? cfg.balanceAlertFloor : 0;
     // Mirror cfg-owned globals into the runtimeConfig singleton so
     // savePersistedConfig() can round-trip ALL settings to the file, keeping
     // the mirror in sync no matter which layer (schema defaults → file →
@@ -1210,7 +1328,49 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // extra-state file. Global scalars are NOT read here — they resolve through
   // the `usage-meter` settings namespace below (single canonical write path).
   loadPersistedConfig();
+  loadStats();
   const meter = new UsageMeterCore(config);
+  // 用量看板聚合（只读）：监听会话事件，按 (底层 provider, model) 累计真实 token/费用。
+  ctx.on('session/event', (session: object, event: { type: string; data: Record<string, unknown>; time: number }) => {
+    try {
+      const ue = usageEventOf(event);
+      if (ue === null) return;
+      const b = bucketsOf(ue.usage);
+      if (isZeroUsage(b)) return;
+      let provider: string | null = null; let model: string | null = null;
+      try {
+        const snap = ctx.sessionProjections.snapshot(session) as { values: Record<string, { provider?: string | null; model?: string | null }> };
+        const v = snap.values['usageCost'];
+        provider = v?.provider ?? null; model = v?.model ?? null;
+      } catch { /* ignore */ }
+      if (provider === null || model === null) return;
+      const alias = aliasOf(provider, model, activeWrapperMarkers);
+      const pv = alias !== null ? alias.provider : provider;
+      const md = alias !== null ? alias.model : model;
+      const real = underlyingProvider(pv) ?? pv;
+      const prev = lastStatsBySession.get(session);
+      if (prev !== undefined && (prev.provider !== provider || prev.model !== model || (prev.input === b.input && prev.output === b.output && prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning))) return;
+      const delta = deltaOf(prev !== undefined && prev.provider === provider && prev.model === model ? { input: prev.input, output: prev.output, cacheRead: prev.cacheRead, cacheWrite: prev.cacheWrite, reasoning: prev.reasoning } : null, b);
+      lastStatsBySession.set(session, { provider, model, input: b.input, output: b.output, cacheRead: b.cacheRead, cacheWrite: b.cacheWrite, reasoning: b.reasoning });
+      if (delta.input === 0 && delta.output === 0 && delta.cacheRead === 0 && delta.cacheWrite === 0 && delta.reasoning === 0) return;
+      const pricing = pricingFor(provider, model, (event as { time?: number }).time ?? Date.now());
+      const deltaCost = pricing === null ? 0 : costOf({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
+      const currency = pricing?.currency ?? 'CNY';
+      const key = `${canonicalId(real)}/${canonicalId(md)}`;
+      const cur = stats[key] ?? (stats[key] = { provider: real, model: md, requestCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, cost: 0, currency, updatedAt: Date.now() });
+      if (event.type === 'assistant/message') cur.requestCount += 1;
+      cur.inputTokens += delta.input; cur.outputTokens += delta.output; cur.cacheReadTokens += delta.cacheRead; cur.cacheWriteTokens += delta.cacheWrite; cur.reasoningTokens += delta.reasoning;
+      cur.cost += deltaCost; cur.currency = currency; cur.updatedAt = Date.now(); statsDirty = true;
+    } catch { /* ignore */ }
+  });
+  // 用看板统计的周期性持久化（每 5s flush；进程退出也 flush）。
+  ctx.effect(() => {
+    const statsFlush = setInterval(() => saveStats(), 5000);
+    const onExit = () => saveStats();
+    process.on('beforeExit', onExit);
+    process.on('exit', onExit);
+    return () => { clearInterval(statsFlush); process.off('beforeExit', onExit); process.off('exit', onExit); };
+  });
   // Fiber-scoped debounced persistence + process-exit flush. Tearing these down
   // with `ctx.effect` keeps a plugin reload from leaking debounce timers or a
   // stale process listener.
@@ -1321,7 +1481,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         const cfg = meter.getConfig();
         const safe = { ...cfg, deepseekApiKey: cfg.deepseekApiKey ? '***' : undefined };
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, config: safe, providers: providerConfigs, priceOverrides, balances, rate: { usdToCny: currentPrices.usdToCny, rateUpdatedAt: lastRateFetchedAt } }));
+        res.end(JSON.stringify({ ok: true, config: safe, providers: providerConfigs, priceOverrides, balances, thresholds, rate: { usdToCny: currentPrices.usdToCny, rateUpdatedAt: lastRateFetchedAt } }));
         return;
       }
       if (req.method === 'POST') {
@@ -1339,6 +1499,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         if (patch.priceSourceUrl !== undefined) globalPatch.priceSourceUrl = patch.priceSourceUrl;
         if (patch.refreshIntervalMs !== undefined) globalPatch.refreshIntervalMs = patch.refreshIntervalMs;
         if (patch.billingConfigDir !== undefined && typeof patch.billingConfigDir === 'string' && patch.billingConfigDir !== '') globalPatch.billingConfigDir = patch.billingConfigDir;
+        if (patch.wrapperMarkers !== undefined && typeof patch.wrapperMarkers === 'string') globalPatch.wrapperMarkers = patch.wrapperMarkers;
+        if (patch.budgetAlertPct !== undefined && typeof patch.budgetAlertPct === 'number' && Number.isFinite(patch.budgetAlertPct)) globalPatch.budgetAlertPct = patch.budgetAlertPct;
+        if (patch.balanceAlertFloor !== undefined && typeof patch.balanceAlertFloor === 'number' && Number.isFinite(patch.balanceAlertFloor)) globalPatch.balanceAlertFloor = patch.balanceAlertFloor;
         if (patch.deepseekApiKey !== undefined && patch.deepseekApiKey !== '***') globalPatch.deepseekApiKey = patch.deepseekApiKey;
         if (Object.keys(globalPatch).length > 0) {
           try {
@@ -1442,6 +1605,19 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
           void meter.refreshRate(true);
         }
         if (ledgerChanged && ledgerKey !== null && ledgerEntry !== null) broadcastBalance(ledgerKey, ledgerEntry, 'manual');
+        // 预警阈值编辑：`thresholds` 对象（key = `p:<provider>` 或 `m:<provider>/<model>`）。
+        if (patch.thresholds !== undefined && typeof patch.thresholds === 'object' && patch.thresholds !== null) {
+          for (const [tk, tv] of Object.entries(patch.thresholds as Record<string, unknown>)) {
+            if (typeof tv !== 'object' || tv === null) continue;
+            const o = tv as Record<string, unknown>;
+            const def: ThreshDef = { ...(thresholds[tk] ?? {}) };
+            if (typeof o.budgetAlertPct === 'number' && Number.isFinite(o.budgetAlertPct)) def.budgetAlertPct = o.budgetAlertPct; else delete def.budgetAlertPct;
+            if (typeof o.balanceAlertFloor === 'number' && Number.isFinite(o.balanceAlertFloor)) def.balanceAlertFloor = o.balanceAlertFloor; else delete def.balanceAlertFloor;
+            if (typeof o.followProvider === 'boolean') def.followProvider = o.followProvider; else delete def.followProvider;
+            thresholds[tk] = def;
+          }
+          savePersistedConfig();
+        }
         if (patch.model !== undefined && patch.model !== null && patch.provider !== undefined && patch.provider !== null) {
           applyModelOverride(String(patch.provider), String(patch.model), patch as { reset?: boolean; prices?: Partial<ModelPricing>; rows?: BillingRow[]; templateId?: string });
         }
@@ -1599,6 +1775,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
 
   // Model-directory channel: expose provider → models (from the DSH LLM runtime)
   // so the settings "供应商定价管理" block can build its provider/model UI.
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/usage-meter/stats',
+    handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
+      saveStats();
+      const values = Object.values(stats).map((s) => ({ ...s })).sort((a, b) => b.cost - a.cost);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, stats: values }));
+    },
+  });
+
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/usage-meter/models',
