@@ -287,20 +287,20 @@ await flush();
 }
 
 // ══ Phase 8: non-DeepSeek provider — legacy ledger path, independent state ═══
-TI.balancesMap['p:baidu'] = { balance: 100, currency: 'CNY' }; // funded seed
+TI.balancesMap['m:baidu/ernie-4.5'] = { balance: 100, currency: 'CNY' }; // funded seed
 requestHeader(s2, 'baidu', 'ernie-4.5'); // bundled CNY row 4/16 per M
 turnStart(s2, 0);
 stepStart(s2, 0, 0);
 usageChunk(s2, 0, 0, 1000, 2000); // 1000/1M*4 + 2000/1M*16 = 0.036 CNY
 {
-  const ledger = TI.balancesMap['p:baidu'];
+  const ledger = TI.balancesMap['m:baidu/ernie-4.5'];
   const v = viewOf(s2);
   check('8a', 'DeepSeek estimate untouched (still 0)', TI.spentSinceAnchor, 0);
   check('8b', 'ledger decremented ≈99.964', ledger?.balance, 99.964, 1e-9);
   check('8c', 'ledger currency CNY', ledger?.currency, 'CNY');
   check('8d', 'view(s2) source computed', v?.source, 'computed');
   check('8e', 'view(s2) totalBalance≈99.964', v?.totalBalance, 99.964, 1e-9);
-  check('8f', 'no per-model ledger key created', 'm:baidu/ernie-4.5' in TI.balancesMap, false);
+  check('8f', 'no provider-level ledger key created', 'p:baidu' in TI.balancesMap, false);
 }
 
 // ══ Phase 9: issue #1 — chunk + message for the SAME request must settle once ═
@@ -310,14 +310,14 @@ usageChunk(s2, 0, 0, 1000, 2000); // 1000/1M*4 + 2000/1M*16 = 0.036 CNY
 // dedup and the request was billed ~2× (issue #1). After the fix they share the
 // real (turn,step) and the second event is a no-op. Uses a FRESH session (s3) so
 // the per-session dedup baseline starts empty.
-TI.balancesMap['p:baidu'] = { balance: 100, currency: 'CNY' }; // fresh funded seed
+TI.balancesMap['m:baidu/ernie-4.5'] = { balance: 100, currency: 'CNY' }; // fresh funded seed
 requestHeader(s3, 'baidu', 'ernie-4.5');
 turnStart(s3, 1);
 stepStart(s3, 1, 0);
 usageChunk(s3, 1, 0, 1000, 2000);    // Δ = 0.036 CNY
 usageMessage(s3, 1, 0, 1000, 2000);  // same request, same usage → must dedup
 {
-  const ledger = TI.balancesMap['p:baidu'];
+  const ledger = TI.balancesMap['m:baidu/ernie-4.5'];
   check('9a', 'issue#1: chunk+message billed once (≈99.964)', ledger?.balance, 99.964, 1e-9);
 }
 
@@ -325,12 +325,12 @@ usageMessage(s3, 1, 0, 1000, 2000);  // same request, same usage → must dedup
 stepStart(s3, 2, 0);
 usageChunk(s3, 2, 0, 0, 0);          // zero sample — not billable
 {
-  const ledger = TI.balancesMap['p:baidu'];
+  const ledger = TI.balancesMap['m:baidu/ernie-4.5'];
   check('10a', 'zero sample: ledger unchanged (99.964)', ledger?.balance, 99.964, 1e-9);
 }
 usageChunk(s3, 2, 0, 1000, 2000);    // real sample right after — must count full
 {
-  const ledger = TI.balancesMap['p:baidu'];
+  const ledger = TI.balancesMap['m:baidu/ernie-4.5'];
   check('10b', 'zero sample: real sample still counts full (≈99.928)', ledger?.balance, 99.928, 1e-9);
 }
 
@@ -339,7 +339,7 @@ stepStart(s3, 3, 0);
 usageChunk(s3, 3, 0, 1000, 2000);    // Δ = 0.036 → 99.892
 usageChunk(s3, 3, 0, 500, 1000);     // smaller → delta clamped to 0, no refund
 {
-  const ledger = TI.balancesMap['p:baidu'];
+  const ledger = TI.balancesMap['m:baidu/ernie-4.5'];
   check('11a', 'smaller sample: no negative delta (still ≈99.892)', ledger?.balance, 99.892, 1e-9);
 }
 

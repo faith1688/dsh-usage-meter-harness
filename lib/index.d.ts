@@ -44,9 +44,11 @@ declare const Config: z<Schemastery.ObjectS<{
     /** Server-side directory for exported/imported billing configs
      *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
     billingConfigDir: z<string, string>;
-    /** 包装标记（视觉插件加在模型/提供商名上的前后缀），逗号/换行分隔；
-     *  命中则把该模型按底层模型计费/聚合。默认覆盖常见视觉包装。 */
-    wrapperMarkers: z<string, string>;
+    /** 包装标记（视觉插件加在提供商/模型名上的前后缀），逐行可开关：
+     *  新格式为 `[{pattern, enabled}]`；老格式（纯文本，换行分隔）仍可读，
+     *  读取时自动补齐包装提供商相关的新默认行。命中即按底层 provider/model
+     *  计费/聚合/查余额。用 `any` 承载两种形态，校验/归一在 wrapper.ts 内完成。 */
+    wrapperMarkers: z<any, any>;
     /** 全局预算告警阈值（% 使用到 budget 的多少时预警，0/diff 关闭）。 */
     budgetAlertPct: z<number, number>;
     /** 全局余额告警下限（余额低于该金额预警；0 = 关闭）。 */
@@ -67,9 +69,11 @@ declare const Config: z<Schemastery.ObjectS<{
     /** Server-side directory for exported/imported billing configs
      *  (empty = $DSH_HOME/usage-meter; persists across DSH upgrades). */
     billingConfigDir: z<string, string>;
-    /** 包装标记（视觉插件加在模型/提供商名上的前后缀），逗号/换行分隔；
-     *  命中则把该模型按底层模型计费/聚合。默认覆盖常见视觉包装。 */
-    wrapperMarkers: z<string, string>;
+    /** 包装标记（视觉插件加在提供商/模型名上的前后缀），逐行可开关：
+     *  新格式为 `[{pattern, enabled}]`；老格式（纯文本，换行分隔）仍可读，
+     *  读取时自动补齐包装提供商相关的新默认行。命中即按底层 provider/model
+     *  计费/聚合/查余额。用 `any` 承载两种形态，校验/归一在 wrapper.ts 内完成。 */
+    wrapperMarkers: z<any, any>;
     /** 全局预算告警阈值（% 使用到 budget 的多少时预警，0/diff 关闭）。 */
     budgetAlertPct: z<number, number>;
     /** 全局余额告警下限（余额低于该金额预警；0 = 关闭）。 */
@@ -79,11 +83,53 @@ declare const Config: z<Schemastery.ObjectS<{
 export declare const name = "usage-meter";
 /** Required services: settings (config namespace), projection registry, webserver (config route). */
 export declare const inject: string[];
+/** 用量看板聚合：按 (底层 provider, model) 累计真实 token/费用（只读会话事件，不碰计费/余额）。 */
+interface StatsBucket {
+    provider: string;
+    model: string;
+    requestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    reasoningTokens: number;
+    cost: number;
+    inputCost: number;
+    cacheReadCost: number;
+    cacheWriteCost: number;
+    outputCost: number;
+    currency: string;
+    updatedAt: number;
+}
+interface ThreshDef {
+    budgetAlertPct?: number;
+    balanceAlertFloor?: number;
+    followProvider?: boolean;
+}
 /** Re-apply every override onto the live price table (after load / edit / reset). */
 declare function applyPriceOverrides(): void;
 /** 弹窗显示行的唯一来源优先级：customRows → override.rows → 内置推导。
  *  override.rows 的峰谷行按北京时间解析出"此刻生效"的单价。 */
 declare function priceRowsOf(provider: string | null, model: string | null, pricing?: ModelPricing | null, now?: number): BillingRow[];
+/** 包装标记识别：视觉插件把 **提供商 id** 包成 `modlens-<provider>` / `<provider>-modlens`
+ *  （老版本是 `vision-toolkit-<provider>`），显示名加 ` (modlens vision)`，模型 id 不变。
+ *  只剥模型名后缀无法映射回底层提供商 → 定价/余额/独立 Key/统计全部落空。
+ *  这里对 provider 与 model 两侧都剥（标记表见 wrapper.ts，逐行可开关）。 */
+declare function underlyingProvider(provider: string | null): string | null;
+/** 当前生效的包装标记「行表」（含未开启行），设置页据此渲染逐行开关。 */
+declare function wrapperRowList(cfg: Record<string, unknown>): Array<{
+    pattern: string;
+    enabled: boolean;
+}>;
+/** 归一化 (provider, model) 到「底层」绑定：剥包装前缀/后缀（提供商与模型两侧）。 */
+declare function modelBinding(provider: string | null, model: string | null): {
+    real: string;
+    model: string;
+} | null;
+/** 每模型独立 API key / 余额快照的文件名安全键。 */
+declare function modelSafeKey(provider: string | null, model: string | null): string | null;
+/** 该模型的余额来源：显式设置优先；否则 DeepSeek 路由默认官方、其余默认手动（向后兼容）。 */
+declare function balanceSourceOf(provider: string | null, model: string | null): 'manual' | 'deepseek';
 interface FoldTurn {
     turn: number;
     input: number;
@@ -94,9 +140,18 @@ interface FoldTurn {
     cost: number;
     currency: string;
     model: string | null;
+    /** 本轮实际归属的底层提供商（显示统计用，不参与计费）。 */
+    provider: string | null;
     startedAt: number;
     endedAt: number;
     endReason: string | null;
+    /** 本轮各计费桶的金额（实际峰谷价；分项展示用，不参与计算）。 */
+    inputCost: number;
+    cacheReadCost: number;
+    cacheWriteCost: number;
+    outputCost: number;
+    /** 本轮最近一次计费是否处于峰时段（显示用；仅峰谷计费模型有值）。 */
+    peak: boolean;
 }
 interface FoldState {
     requestCount: number;
@@ -155,11 +210,17 @@ declare const usageCostProjection: {
             cacheWrite: zod.ZodCatch<zod.ZodNumber>;
             reasoning: zod.ZodCatch<zod.ZodNumber>;
             cost: zod.ZodCatch<zod.ZodNumber>;
+            inputCost: zod.ZodCatch<zod.ZodNumber>;
+            cacheReadCost: zod.ZodCatch<zod.ZodNumber>;
+            cacheWriteCost: zod.ZodCatch<zod.ZodNumber>;
+            outputCost: zod.ZodCatch<zod.ZodNumber>;
             currency: zod.ZodCatch<zod.ZodString>;
             model: zod.ZodCatch<zod.ZodNullable<zod.ZodString>>;
             startedAt: zod.ZodCatch<zod.ZodNumber>;
             endedAt: zod.ZodCatch<zod.ZodNumber>;
             endReason: zod.ZodCatch<zod.ZodNullable<zod.ZodString>>;
+            provider: zod.ZodCatch<zod.ZodNullable<zod.ZodString>>;
+            peak: zod.ZodCatch<zod.ZodBoolean>;
         }, zod.core.$strip>>>;
         last: zod.ZodCatch<zod.ZodNullable<zod.ZodObject<{
             turn: zod.ZodCatch<zod.ZodNumber>;
@@ -387,6 +448,12 @@ declare const usageCostProjection: {
                 cacheReadTokens: zod.ZodNumber;
                 cacheWriteTokens: zod.ZodNumber;
                 reasoningTokens: zod.ZodNumber;
+                inputCost: zod.ZodCatch<zod.ZodNumber>;
+                cacheReadCost: zod.ZodCatch<zod.ZodNumber>;
+                cacheWriteCost: zod.ZodCatch<zod.ZodNumber>;
+                outputCost: zod.ZodCatch<zod.ZodNumber>;
+                provider: zod.ZodCatch<zod.ZodNullable<zod.ZodString>>;
+                peak: zod.ZodCatch<zod.ZodBoolean>;
             }, zod.core.$strict>>;
             lastTurn: zod.ZodCatch<zod.ZodNullable<zod.ZodObject<{
                 turn: zod.ZodNumber;
@@ -401,6 +468,12 @@ declare const usageCostProjection: {
                 cacheReadTokens: zod.ZodNumber;
                 cacheWriteTokens: zod.ZodNumber;
                 reasoningTokens: zod.ZodNumber;
+                inputCost: zod.ZodCatch<zod.ZodNumber>;
+                cacheReadCost: zod.ZodCatch<zod.ZodNumber>;
+                cacheWriteCost: zod.ZodCatch<zod.ZodNumber>;
+                outputCost: zod.ZodCatch<zod.ZodNumber>;
+                provider: zod.ZodCatch<zod.ZodNullable<zod.ZodString>>;
+                peak: zod.ZodCatch<zod.ZodBoolean>;
             }, zod.core.$strict>>>;
             peakState: zod.ZodCatch<zod.ZodNullable<zod.ZodEnum<{
                 peak: "peak";
@@ -440,4 +513,18 @@ export declare const __testInternals: {
         balance: number;
         currency: string;
     }>;
+    modelBinding: typeof modelBinding;
+    underlyingProvider: typeof underlyingProvider;
+    balanceSourceOf: typeof balanceSourceOf;
+    modelSafeKey: typeof modelSafeKey;
+    wrapperRowList: typeof wrapperRowList;
+    readonly statsMap: Record<string, StatsBucket>;
+    readonly thresholdsMap: Record<string, ThreshDef>;
+    readonly providerConfigsMap: Record<string, {
+        currency?: string;
+        sharedBalance?: boolean;
+        sharedApiKey?: boolean;
+    }>;
+    readonly balanceSourcesMap: Record<string, "manual" | "deepseek">;
+    readonly modelApiKeyFlagsMap: Record<string, boolean>;
 };

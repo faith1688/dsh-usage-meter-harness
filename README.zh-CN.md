@@ -27,7 +27,7 @@ dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness@latest
 ### 方式二 —— GitHub 源（需要 pnpm）
 
 ```bash
-dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness#main
 ```
 
 （`--verbose` 显示安装进度。）
@@ -124,16 +124,21 @@ pnpm update @faith1688/dsh-usage-meter-harness
 | 官方价预填 | DeepSeek 官方模型自动预填官方价与官方峰谷时段 |
 | 内置价格表 | 内置 19 家厂商 137 个模型价格；可选 LiteLLM 形状的远端价格源 |
 | 汇率自动刷新 | USD→CNY 自动获取，超过 24 小时自动更新 |
+| 一键同步官方价格 | 设置页一键抓取 DeepSeek 官网价格页，解析最新价格与峰谷时段并写入覆盖（需先填全局 API Key），随时保持官方价最新 |
 | 旧数据迁移 | 旧版手动初始余额/充值记录自动迁移为厂商钱包，余额不丢失 |
 
 ### 设置与体验
 
 | 功能 | 说明 |
 | --- | --- |
-| 中英双语界面 | 设置页右上角一键切换 中文 / English，设置页与弹窗全部即时生效。只影响显示，绝不改动你保存的数据 |
+| 中英双语界面 | 设置页右上角语言切换：跟随系统 / 中文 / English，设置页与弹窗全部即时生效，选择自动记住。只影响显示，绝不改动你保存的数据 |
 | 使用中锁定 | 模型正在生成时锁定其编辑器，保证进行中的轮次价格一致 |
 | 弹窗所见即所得 | 用量卡的行名与格子完全抄自你选择的模板 |
 | 无侵入 | 标准 DSH cordis 插件；不改动其他插件，不动 DSH 核心文件 |
+| 峰谷胶囊 | 谷价时胶囊变浅绿、峰价时变浅红（计费中带柔和呼吸光晕），一眼看清当前是峰价还是谷价 |
+| 未保存/已保存 | 模型卡编辑后显示「未保存」，点保存后显示「已保存」——不再有含糊的「保存中」 |
+| 当前会话看板 | 弹窗默认直接展开「当前会话」视图（总计 + 分项金额 + 每轮费用）；坐标标签用 `provider · model`，同名官方/自定义模型一眼可分 |
+| DS API Key 守卫 | 非官方模型勾选「DS API Key」时提示该选项仅 DeepSeek 模型使用；自定义模型绝不回落官方全局 key，未设置显示「未配置」 |
 
 ## 支持的模型
 

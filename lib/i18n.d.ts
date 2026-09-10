@@ -1,9 +1,13 @@
 /** Minimal bilingual UI strings for dsh-usage-meter (zh default / en).
- *  Language is a per-browser choice stored in localStorage and shared by the
- *  settings page and the popup readout. */
+ *  Language follows the DSH shell locale (ctx.locale, 'zh'|'en'): the client
+ *  plugin injects a provider (setShellLocaleProvider) and bridges the shell's
+ *  'locale/change' event to the 'um-lang-change' window event, which the
+ *  settings page and the popup readout listen to for a live re-render. */
 export type Lang = 'zh' | 'en';
+export declare function setShellLocaleProvider(p: (() => Lang) | null): void;
+/** Manual override from the settings-page language select; null = follow shell. */
+export declare function setManualLang(l: Lang | null): void;
 export declare function getLang(): Lang;
-export declare function setLang(l: Lang): void;
 declare const zh: {
     subtitle: string;
     language: string;
@@ -17,6 +21,7 @@ declare const zh: {
     notFetched: string;
     fetchedAt: string;
     staleOver24h: string;
+    officialPrices: string;
     save: string;
     saved: string;
     saveFailed: string;

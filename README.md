@@ -28,10 +28,11 @@ dsh plugin --profile web add --verbose @faith1688/dsh-usage-meter-harness@latest
 ### Method 2 — GitHub via DSH CLI (needs pnpm)
 
 ```bash
-dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness
+dsh plugin --profile web add --verbose github:faith1688/dsh-usage-meter-harness#main
 ```
 
-(`--verbose` shows the install progress.)
+(`--verbose` shows the install progress. `#main` always installs the latest
+main branch — the newest release.)
 
 ### Method 3 — one-line installer, no pnpm (recommended)
 
@@ -143,16 +144,21 @@ in `node_modules`.
 | Official price prefill | DeepSeek official models come pre-filled with official prices and the official peak schedule |
 | Built-in price table | 137 models across 19 vendors bundled; optional LiteLLM-shaped remote price source |
 | Exchange rate | USD→CNY fetched automatically, refreshed when older than 24 h |
+| Sync official prices | One click on the settings page fetches the DeepSeek official price page, parses the latest prices and peak/off-peak windows, and writes them as overrides (a global API Key must be set first) — keep official pricing current at any time |
 | Legacy migration | Old manual initial-balance/top-up settings migrate into provider wallets automatically |
 
 ### Settings & UX
 
 | Feature | Description |
 | --- | --- |
-| Bilingual UI | 中文 / English switch at the top-right of the settings page; applies everywhere instantly (popup included). Display only — saved data never changes |
+| Bilingual UI | Language switch at the top-right of the settings page: Follow system / 中文 / English; applies everywhere instantly (popup included) and the choice is remembered. Display only — saved data never changes |
 | In-use lock | While a model is generating, its editor is locked so a running turn keeps consistent prices |
 | WYSIWYG popup | Usage-card rows are copied verbatim from your template selection |
 | Non-intrusive | Standard DSH cordis plugin; touches no other plugin and no DSH core files |
+| Peak/off-peak capsule | The usage capsule turns light-green on off-peak and light-red on peak (with a soft breathing glow while billing), so the active tier is obvious at a glance |
+| Unsaved / saved state | The model card shows **Unsaved** after you edit and **Saved** after you click Save — no more ambiguous "saving…" |
+| Current-session dashboard | The popup opens straight into the **Current session** view (total + per-category cost + per-turn ledger); the axis labels use `provider · model` so official vs custom models with the same name are never confused |
+| DS API Key guard | Non-official models picking "DS API Key" get a centered hint that the option is for DeepSeek models only; a custom model never falls back to the official global key — unset shows "未配置/not configured" |
 
 ## Supported models
 

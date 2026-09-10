@@ -89,6 +89,8 @@ export interface TurnCost {
     cost: number;
     currency: string;
     model: string | null;
+    /** 本轮实际归属的底层提供商（显示统计用，不参与计费）。 */
+    provider: string | null;
     startedAt: number;
     endedAt: number;
     endReason: string | null;
@@ -97,6 +99,13 @@ export interface TurnCost {
     cacheReadTokens: number;
     cacheWriteTokens: number;
     reasoningTokens: number;
+    /** 本轮各计费桶金额（实际峰谷价；分项展示用）。 */
+    inputCost: number;
+    cacheReadCost: number;
+    cacheWriteCost: number;
+    outputCost: number;
+    /** True when this turn ran under peak pricing (else off-peak); false for no peak/off-peak pricing. */
+    peak: boolean;
 }
 /** Live account balance served for one provider (DeepSeek API or funded ledger). */
 export interface AccountBalance {
