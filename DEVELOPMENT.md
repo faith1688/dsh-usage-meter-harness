@@ -39,7 +39,7 @@
    维护者下次照抄的是正确版本。
 4. `npm pack` —— 生成 `faith1688-dsh-usage-meter-harness-<v>.tgz`。
 5. **本机（faith）验证**：覆盖 profile 的 lib 与 package.json
-   （`C:\Users\faith\.dsh\profiles\web\node_modules\@faith1688\dsh-usage-meter-harness`），
+   （`~/.dsh/profiles/web/node_modules/@faith1688/dsh-usage-meter-harness`），
    浏览器强刷 Ctrl+Shift+R 确认界面。
 6. `git add` + `git commit` + `git tag v<版本>` + `git push origin main --tags`。
 7. **发布 npm（必须显式 npmjs 源，本机默认 npmmirror 镜像不能发布）**：
@@ -106,7 +106,7 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
 | 更新后 UI 还是旧的 | 只重启了 dsh web，没装新版；或浏览器缓存 | 先 `add <pkg>@版本` 再重启，浏览器 Ctrl+Shift+R |
 | 渐变字变成"颜色块"（无文字） | `background-clip:text` 带 `0%/100%` 位置参数时失效；动态改背景色时浏览器不重新裁剪会卡死 | 渐变**不带位置参数**；档位切换用 React `key` 强制重建 span（v1.0.28） |
 | 插件装了但接口 404、无日志 | 包内 cordis.patch.yml insert 被清空（1.0.7 事故） | 恢复恰好一条 insert |
-| 会话打不开：`history unavailable ... too_small turns[N].inputTokens`（v1.0.29 及之前） | usageCost 投影的 delta = 新采样 − 上次采样，LLM 重试/供应商口径变小 → 负数被累进 turn 桶并随投影持久化；wire schema `nonnegative` 解析即抛，整份历史拒载（会话日志本身无负值） | **写入侧**防负（delta 为负时按覆盖处理或钳 0）；**读取侧** view()/emptyUsageCost() 全字段 `Math.max(0,·)` 钳制兜底（v1.0.30）。排查用 `Z:\deepseek\scripts\decode-session.mjs` 多帧解 zstd 核日志 |
+| 会话打不开：`history unavailable ... too_small turns[N].inputTokens`（v1.0.29 及之前） | usageCost 投影的 delta = 新采样 − 上次采样，LLM 重试/供应商口径变小 → 负数被累进 turn 桶并随投影持久化；wire schema `nonnegative` 解析即抛，整份历史拒载（会话日志本身无负值） | **写入侧**防负（delta 为负时按覆盖处理或钳 0）；**读取侧** view()/emptyUsageCost() 全字段 `Math.max(0,·)` 钳制兜底（v1.0.30）。排查用 decode-session.mjs（多帧解 zstd 核日志） |
 | 共享余额下改模型 B 余额，连带改了正在运行的模型 A | 共享余额把组内所有模型写入同一个 `p:<provider>` 钱包；后端 config POST 只按 `balanceKeyOf(pv, model)` 写，不校验该组是否正在运行；前端只锁「当前模型」不锁同组其它模型 | 后端守卫 `sharedGroupLocked`（v1.0.33）：同组任一模型运行时拒改余额/充值并返回 `409 shared-balance-running/shard-balance-running` 及原因；前端 `sharedBalanceLocked` 锁定同组所有模型的余额输入框并提示。回归测 `scripts/test-shared-balance-lock.mjs` |
 | 视觉模型 DeepSeek V4 Flash Vision Exp 识别不了 | 模型已适配（`prices-providers.ts` + `client.tsx` OFFICIAL 表），但用户相册仍跑旧版（`file:`/固定绑定未升级，`@latest` 被 pnpm 跳过） | 用**确切版本号** `add ...@1.0.33`，或 `npx -y @faith1688/dsh-usage-meter-harness@latest`；已加 vision-exp 峰谷定价与 UI 预填 |
 | 用 modlens 包装模型时「余额 未配置」/ 统计与定价不聚合 | **包装发生在 provider id 上，不是模型名**：modlens 会再注册 `modlens-<provider>`、`<provider>-modlens`、`vision-toolkit-<provider>`（模型 id 不变，只有显示名多 ` (modlens vision)`）。旧版 `underlyingProvider` 只剥 `vision-toolkit-`，于是 `modlens-deepseek-zgktz` ≠ `deepseek-zgktz` → 定价/余额来源/独立 Key/看板统计全部落空 | v2.0.13：标记表 `src/wrapper.ts`（默认 `modlens-` / `-modlens` / `vision-toolkit-` / `(modlens vision)` / ` (vision)` / `-vision`，**逐行可开关**）同时剥 provider 与 model 两侧；`underlyingProvider` 全量归一；已持久化的包装键在启动时回填到底层键；设置页「视觉识别」改逐行 +/- 编辑。回归测 `scripts/test-wrapper.mjs`（逻辑）+ `scripts/test-wrapper-route.mjs`（真实 apply 端到端）+ `scripts/probe-wrapper-route.mjs`（真机数据） |

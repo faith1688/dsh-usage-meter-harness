@@ -83,9 +83,9 @@ export declare const DEFAULT_CUSTOM: ThemeCustom;
 /** 20 curated themes, ordered light → neutral → dark (v2.0.20: 全部浅色在前、深色在最后，
 *  石板灰居中)。命名统一为「四字意境名 +（默认/浅色/中性/暗黑）」，名字与配色相关。
 *  前 12 套为手调（5 浅色 + 2 浅色粉彩 + 1 中性 + 4 暗黑），后 8 套来自
-*  Z:\deepseek\palettes\palettes.json（4 浅色 + 4 暗黑，2026-07 新增）。每套自带
+*  palettes.json 提取配色（开发者本地开发产物，4 浅色 + 4 暗黑，2026-07 新增）。每套自带
 *  手调 `customDefault`（胶囊 flat/peak + 呼吸 ring flat/peak/off + 预警 ok/near/over +
-*  字体分类 main/model/value/sub），不用动取色器也能完整呈现主题视觉。 */
+*  字体分类 main/model/value/sub），不用动取色器也能完整呈现主题视觉。 (v2.0.33: 林滩晓色置顶并设为默认主题)。 */
 export declare const THEMES: Theme[];
 /** Convert any color (#rgb/#rrggbb/rgb()/rgba()) into an rgba() with the given
  *  alpha. Used by the capsule renderer so user-picked hex colors still render

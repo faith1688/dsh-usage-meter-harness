@@ -3,7 +3,15 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-const require = createRequire('C:/Users/faith/.dsh/profiles/web/node_modules/pngjs/package.json');
+// 临时开发工具（非运行时依赖）：优先从本仓库解析 pngjs，解析不到就明确报错。
+let require;
+try {
+  require = createRequire(import.meta.url);
+  require.resolve('pngjs');
+} catch {
+  console.error('pngjs 不可用：请先在本仓库运行 npm i -D pngjs（仅本临时工具需要，插件运行不需要）。');
+  process.exit(1);
+}
 const { PNG } = require('pngjs');
 
 const file = process.argv[2];

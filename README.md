@@ -203,7 +203,9 @@ MIT © [faith1688](https://github.com/faith1688)
 ## Privacy
 
 - The plugin makes **no telemetry and no analytics calls**.
-- Network requests are limited to two optional ones: querying the **official
-  DeepSeek balance API** with the API key you configure yourself, and fetching a
-  public USD→CNY exchange rate. Nothing else leaves your machine.
+- Network requests are limited to four optional ones, all initiated by you: querying the
+  **official DeepSeek balance API** with the API key you configure yourself, fetching a
+  public USD→CNY exchange rate, fetching the official pricing page during a one-click
+  price sync, and — only when rule parsing fails — sending that page's content to the
+  DeepSeek API with your global key for extraction. Nothing else leaves your machine.
 - The source is MIT-licensed and fully readable on GitHub.

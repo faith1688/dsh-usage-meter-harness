@@ -585,11 +585,12 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
   const overBudget = remaining !== null && remaining < 0;
   const budgetRatio =
     usage.budget !== null && usage.budget > 0 ? Math.max(0, Math.min(1, (remaining ?? 0) / usage.budget)) : null;
-  // 胶囊视觉：余额文字色（绿→橙→红）+ 峰谷外圈呼吸色（峰=红蓝，谷=绿白，缓慢不晃眼）。
+  // 胶囊视觉（v2.0.30）：身份色=主题 brand 家族（flat/peak=brand，off=brand2），状态色=主题 alert（与弹窗峰谷徽章一致）；速度档位用全局预警色。
+  // v2.0.32：余额金额（余额足）= 全局色 balanceOk（默认更亮绿 #22c55e，设置页「胶囊余额颜色」可调）；不足/透支仍=主题 alert。
   const bal = usage.accountBalance !== null ? usage.accountBalance.totalBalance : null;
   const balOver = bal !== null && bal <= 0;
   const balNear = bal !== null && !balOver && usage.alertBalanceFloor > 0 && bal < usage.alertBalanceFloor;
-  const balColor = bal === null ? t.text3 : balOver ? globalColors.alertOver : balNear ? globalColors.alertNear : globalColors.alertOk;
+  const balColor = bal === null ? t.text3 : balOver ? theme.alert.over : balNear ? theme.alert.near : globalColors.balanceOk;
   const billingActive = rate !== null; // 会话正在流式输出（实际扣费中）
   const peakNow = usage.peakState; // 'peak' | 'off' | null
 
@@ -644,11 +645,11 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
           borderRadius: 999,
           boxShadow: peakNow === 'peak' ? `inset 0 1px 0 rgba(255,255,255,0.25), 0 0 10px ${withAlpha(theme.pill.ringPeak, 0.18)}` : peakNow === 'off' ? `inset 0 1px 0 rgba(255,255,255,0.25), 0 0 10px ${withAlpha(theme.pill.ringOff, 0.18)}` : `inset 0 1px 0 rgba(255,255,255,0.20), 0 0 8px ${withAlpha(theme.pill.ringFlat, 0.15)}`,
           background: peakNow === 'peak'
-            ? withAlpha(theme.pill.peak, 0.13)
+            ? withAlpha(theme.pill.peak, 0.16)
             : peakNow === 'off'
-              ? withAlpha(theme.pill.ringOff, 0.12)
+              ? withAlpha(theme.pill.ringOff, 0.10)
               : withAlpha(theme.pill.flat, 0.11),
-          color: peakNow === 'peak' ? globalColors.alertOver : peakNow === 'off' ? globalColors.alertOk : t.text2,
+          color: peakNow === 'peak' ? theme.alert.over : peakNow === 'off' ? theme.alert.ok : t.text2,
           fontSize: 11,
           lineHeight: '16px',
           fontVariantNumeric: 'tabular-nums',
@@ -676,7 +677,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
             style={{
               fontWeight: 600,
               color: balColor,
-              background: accountBalance === null ? 'rgba(139, 148, 158, 0.10)' : balOver ? 'rgba(209, 36, 47, 0.10)' : balNear ? 'rgba(245, 158, 11, 0.12)' : 'rgba(22, 163, 74, 0.10)',
+              background: accountBalance === null ? 'rgba(139, 148, 158, 0.10)' : balOver ? withAlpha(theme.alert.over, 0.10) : balNear ? withAlpha(theme.alert.near, 0.12) : withAlpha(globalColors.balanceOk, 0.10),
               borderRadius: 999,
               padding: '0 6px',
               whiteSpace: 'nowrap',
@@ -2865,6 +2866,7 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
                     {(() => {
                       const gEntries: Array<[string, keyof GlobalColors]> = [
                         ['预警颜色（余额足）', 'alertOk'], ['预警颜色（余额不足）', 'alertNear'], ['预警颜色（透支）', 'alertOver'],
+                        ['胶囊余额颜色（余额足）', 'balanceOk'],
                         ['速度颜色（0-50 tokens/s）', 'speedLow'], ['速度颜色（51-100 tokens/s）', 'speedMid'], ['速度颜色（101+ tokens/s）', 'speedHi'],
                       ];
                       return gEntries.map(([label, key]) => (

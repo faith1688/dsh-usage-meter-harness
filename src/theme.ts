@@ -102,13 +102,27 @@ export const DEFAULT_CUSTOM: ThemeCustom = {
  /** 20 curated themes, ordered light → neutral → dark (v2.0.20: 全部浅色在前、深色在最后，
  *  石板灰居中)。命名统一为「四字意境名 +（默认/浅色/中性/暗黑）」，名字与配色相关。
  *  前 12 套为手调（5 浅色 + 2 浅色粉彩 + 1 中性 + 4 暗黑），后 8 套来自
- *  Z:\deepseek\palettes\palettes.json（4 浅色 + 4 暗黑，2026-07 新增）。每套自带
+ *  palettes.json 提取配色（开发者本地开发产物，4 浅色 + 4 暗黑，2026-07 新增）。每套自带
  *  手调 `customDefault`（胶囊 flat/peak + 呼吸 ring flat/peak/off + 预警 ok/near/over +
- *  字体分类 main/model/value/sub），不用动取色器也能完整呈现主题视觉。 */
+ *  字体分类 main/model/value/sub），不用动取色器也能完整呈现主题视觉。 (v2.0.33: 林滩晓色置顶并设为默认主题)。 */
 export const THEMES: Theme[] = [
-  // ── 1) 靛蓝黎明（默认）
+  // ── 1) 林滩晓色（默认，浅色）
   {
-    id: 'indigo', name: '靛蓝黎明（默认）',
+    id: 'forest-beach-dawn', name: '林滩晓色（默认，浅色）',
+    bg: 'linear-gradient(180deg, #e0f4fb 0%, #eef7fb 45%, #f7fafc 100%)',
+    bgSoft: '#eef7fb', border: 'rgba(56,127,182,0.35)',
+    brand: '#387fb6', brand2: '#b33647',
+    text: '#1f3a52', text2: '#4d6579', text3: '#8b9aa8',
+    textMain: '#1f3a52', textModel: '#387fb6', textValue: '#b33647', textSub: '#8b9aa8',
+    accent: 'rgba(56,127,182,0.10)', card: '#ffffff', error: '#b33647', ok: '#639a72',
+    pill: { flat: 'rgba(201,205,208,0.35)', peak: 'rgba(179,54,71,0.25)', ringFlat: 'rgba(56,127,182,0.55)', ringPeak: 'rgba(179,54,71,0.65)', ringOff: 'rgba(215,235,206,0.60)' },
+    palette: ['#387fb6', '#b33647', '#db7268', '#d7ebce', '#f8efb5', '#d9d5b6', '#c9cdd0', '#e0f4fb'],
+    alert: { ok: '#639a72', near: '#db7268', over: '#b33647' },
+    customDefault: { pillFlat: '#387fb6', pillPeak: '#7fb069', ringFlat: '#387fb6', ringPeak: '#7fb069', ringOff: '#c9cdd0', alertOk: '#639a72', alertNear: '#db7268', alertOver: '#b33647', textMain: '#1f3a52', textModel: '#387fb6', textValue: '#b33647', textSub: '#8b9aa8' },
+  },
+  // ── 2) 靛蓝黎明（浅色）
+  {
+    id: 'indigo', name: '靛蓝黎明（浅色）',
     bg: 'linear-gradient(180deg, #e2ebff 0%, #f6f8ff 45%, #ffffff 100%)',
     bgSoft: '#f6f8ff', border: 'rgba(77,107,254,0.35)',
     brand: '#4d6bfe', brand2: '#7c5cff',
@@ -118,9 +132,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(77,107,254,0.18)', peak: 'rgba(244,63,94,0.22)', ringFlat: 'rgba(77,107,254,0.5)', ringPeak: 'rgba(244,63,94,0.65)', ringOff: 'rgba(22,163,74,0.60)' },
     palette: ['#4d6bfe', '#7c5cff', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#8b5cf6', '#14b8a6'],
     alert: { ok: '#16a34a', near: '#f59e0b', over: '#d1242f' },
-    customDefault: { pillFlat: '#4d6bfe', pillPeak: '#f43f5e', ringFlat: '#4d6bfe', ringPeak: '#f43f5e', ringOff: '#10b981', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#1f2328', textModel: '#4d6bfe', textValue: '#4d6bfe', textSub: '#8b949e' },
+    customDefault: { pillFlat: '#4d6bfe', pillPeak: '#4d6bfe', ringFlat: '#4d6bfe', ringPeak: '#4d6bfe', ringOff: '#7c8cf8', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#1f2328', textModel: '#4d6bfe', textValue: '#4d6bfe', textSub: '#8b949e' },
   },
-  // ── 2) 碧海晴空（浅色）
+  // ── 3) 碧海晴空（浅色）
   {
     id: 'cyan', name: '碧海晴空（浅色）',
     bg: 'linear-gradient(180deg, #dcf6f9 0%, #f2fbfc 45%, #ffffff 100%)',
@@ -132,9 +146,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(14,139,168,0.20)', peak: 'rgba(236,72,153,0.22)', ringFlat: 'rgba(14,139,168,0.55)', ringPeak: 'rgba(236,72,153,0.65)', ringOff: 'rgba(20,184,166,0.60)' },
     palette: ['#0e8ba8', '#0ea5b7', '#14b8a6', '#f59e0b', '#ec4899', '#22d3ee', '#06b6d4', '#f97316', '#6366f1', '#34d399'],
     alert: { ok: '#0f766e', near: '#f59e0b', over: '#d1242f' },
-    customDefault: { pillFlat: '#0e8ba8', pillPeak: '#ec4899', ringFlat: '#0e8ba8', ringPeak: '#f43f5e', ringOff: '#14b8a6', alertOk: '#0f766e', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#10232a', textModel: '#0e8ba8', textValue: '#0e8ba8', textSub: '#7c9199' },
+    customDefault: { pillFlat: '#0e8ba8', pillPeak: '#0e8ba8', ringFlat: '#0e8ba8', ringPeak: '#0e8ba8', ringOff: '#22b8cf', alertOk: '#0f766e', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#10232a', textModel: '#0e8ba8', textValue: '#0e8ba8', textSub: '#7c9199' },
   },
-  // ── 3) 翡翠青绿（浅色）
+  // ── 4) 翡翠青绿（浅色）
   {
     id: 'emerald', name: '翡翠青绿（浅色）',
     bg: 'linear-gradient(180deg, #d9f2e4 0%, #f0faf4 45%, #ffffff 100%)',
@@ -146,9 +160,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(10,157,99,0.20)', peak: 'rgba(217,70,239,0.22)', ringFlat: 'rgba(10,157,99,0.55)', ringPeak: 'rgba(217,70,239,0.60)', ringOff: 'rgba(20,184,166,0.60)' },
     palette: ['#0a9d63', '#10b981', '#f59e0b', '#22c55e', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#8b5cf6', '#14b8a6'],
     alert: { ok: '#0f766e', near: '#f59e0b', over: '#d1242f' },
-    customDefault: { pillFlat: '#0a9d63', pillPeak: '#d946ef', ringFlat: '#0a9d63', ringPeak: '#ec4899', ringOff: '#14b8a6', alertOk: '#0f766e', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#10241c', textModel: '#0a9d63', textValue: '#0a9d63', textSub: '#759387' },
+    customDefault: { pillFlat: '#0a9d63', pillPeak: '#0a9d63', ringFlat: '#0a9d63', ringPeak: '#0a9d63', ringOff: '#16c878', alertOk: '#0f766e', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#10241c', textModel: '#0a9d63', textValue: '#0a9d63', textSub: '#759387' },
   },
-  // ── 4) 玫瑰鲜红（浅色）
+  // ── 5) 玫瑰鲜红（浅色）
   {
     id: 'rose', name: '玫瑰鲜红（浅色）',
     bg: 'linear-gradient(180deg, #fbe4e6 0%, #fdf2f3 45%, #ffffff 100%)',
@@ -160,9 +174,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(201,64,86,0.22)', peak: 'rgba(124,58,237,0.22)', ringFlat: 'rgba(201,64,86,0.55)', ringPeak: 'rgba(124,58,237,0.60)', ringOff: 'rgba(236,72,153,0.60)' },
     palette: ['#c94056', '#e4576b', '#f59e0b', '#16a34a', '#ef4444', '#06b6d4', '#7c3aed', '#f97316', '#8b5cf6', '#14b8a6'],
     alert: { ok: '#16a34a', near: '#f59e0b', over: '#b71c2f' },
-    customDefault: { pillFlat: '#c94056', pillPeak: '#7c3aed', ringFlat: '#c94056', ringPeak: '#7c3aed', ringOff: '#ec4899', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#b71c2f', textMain: '#2a1418', textModel: '#c94056', textValue: '#c94056', textSub: '#8f777b' },
+    customDefault: { pillFlat: '#c94056', pillPeak: '#c94056', ringFlat: '#c94056', ringPeak: '#c94056', ringOff: '#e8798a', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#b71c2f', textMain: '#2a1418', textModel: '#c94056', textValue: '#c94056', textSub: '#8f777b' },
   },
-  // ── 5) 蜜桃浅粉（浅色）
+  // ── 6) 蜜桃浅粉（浅色）
   {
     id: 'peach', name: '蜜桃浅粉（浅色）',
     bg: 'linear-gradient(180deg, #fff1f0 0%, #fff7f5 45%, #ffffff 100%)',
@@ -174,9 +188,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(255,107,107,0.18)', peak: 'rgba(217,70,239,0.22)', ringFlat: 'rgba(255,107,107,0.55)', ringPeak: 'rgba(217,70,239,0.65)', ringOff: 'rgba(251,146,60,0.60)' },
     palette: ['#ff6b6b', '#ff8e72', '#fbbf24', '#34d399', '#ef4444', '#06b6d4', '#ec4899', '#f97316', '#a78bfa', '#14b8a6'],
     alert: { ok: '#16a34a', near: '#f59e0b', over: '#d1242f' },
-    customDefault: { pillFlat: '#ff6b6b', pillPeak: '#d946ef', ringFlat: '#ff6b6b', ringPeak: '#d946ef', ringOff: '#fb923c', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#2a1a18', textModel: '#ff6b6b', textValue: '#ff6b6b', textSub: '#8a7775' },
+    customDefault: { pillFlat: '#ff6b6b', pillPeak: '#ff6b6b', ringFlat: '#ff6b6b', ringPeak: '#ff6b6b', ringOff: '#ffa94d', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#2a1a18', textModel: '#ff6b6b', textValue: '#ff6b6b', textSub: '#8a7775' },
   },
-  // ── 6) 丁香薄雾（浅色）
+  // ── 7) 丁香薄雾（浅色）
   {
     id: 'lavender', name: '丁香薄雾（浅色）',
     bg: 'linear-gradient(180deg, #efe9fd 0%, #f8f5ff 45%, #ffffff 100%)',
@@ -188,9 +202,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(139,108,231,0.18)', peak: 'rgba(236,72,153,0.22)', ringFlat: 'rgba(139,108,231,0.55)', ringPeak: 'rgba(236,72,153,0.65)', ringOff: 'rgba(96,165,250,0.60)' },
     palette: ['#8b6ce7', '#a78bfa', '#fbbf24', '#34d399', '#f87171', '#22d3ee', '#f472b6', '#fb923c', '#60a5fa', '#2dd4bf'],
     alert: { ok: '#16a34a', near: '#f59e0b', over: '#d1242f' },
-    customDefault: { pillFlat: '#8b6ce7', pillPeak: '#ec4899', ringFlat: '#8b6ce7', ringPeak: '#ec4899', ringOff: '#60a5fa', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#221a33', textModel: '#8b6ce7', textValue: '#8b6ce7', textSub: '#837a9b' },
+    customDefault: { pillFlat: '#8b6ce7', pillPeak: '#8b6ce7', ringFlat: '#8b6ce7', ringPeak: '#8b6ce7', ringOff: '#a78bfa', alertOk: '#16a34a', alertNear: '#f59e0b', alertOver: '#d1242f', textMain: '#221a33', textModel: '#8b6ce7', textValue: '#8b6ce7', textSub: '#837a9b' },
   },
-  // ── 7) 琥珀落日（浅色）
+  // ── 8) 琥珀落日（浅色）
   {
     id: 'amber', name: '琥珀落日（浅色）',
     bg: 'linear-gradient(180deg, #fbead7 0%, #fdf6ec 45%, #ffffff 100%)',
@@ -202,9 +216,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(190,132,52,0.22)', peak: 'rgba(217,70,239,0.22)', ringFlat: 'rgba(190,132,52,0.55)', ringPeak: 'rgba(217,70,239,0.60)', ringOff: 'rgba(176,120,23,0.65)' },
     palette: ['#b07817', '#d99c20', '#f59e0b', '#16a34a', '#ef4444', '#06b6d4', '#ec4899', '#dc2626', '#8b5cf6', '#14b8a6'],
     alert: { ok: '#0f766e', near: '#b45309', over: '#b71c2f' },
-    customDefault: { pillFlat: '#b07817', pillPeak: '#d946ef', ringFlat: '#b07817', ringPeak: '#dc2626', ringOff: '#d99c20', alertOk: '#0f766e', alertNear: '#b45309', alertOver: '#b71c2f', textMain: '#2a2113', textModel: '#b07817', textValue: '#b07817', textSub: '#92876f' },
+    customDefault: { pillFlat: '#b07817', pillPeak: '#b07817', ringFlat: '#b07817', ringPeak: '#b07817', ringOff: '#d99a2b', alertOk: '#0f766e', alertNear: '#b45309', alertOver: '#b71c2f', textMain: '#2a2113', textModel: '#b07817', textValue: '#b07817', textSub: '#92876f' },
   },
-  // ── 8) 粉彩紫霞（浅色）
+  // ── 9) 粉彩紫霞（浅色）
   {
     id: 'pastel-purple-haze', name: '粉彩紫霞（浅色）',
     bg: 'linear-gradient(180deg, #f7dfd7 0%, #f9e8e3 45%, #fdf6f4 100%)',
@@ -216,9 +230,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(182,179,214,0.28)', peak: 'rgba(235,104,123,0.22)', ringFlat: 'rgba(182,179,214,0.60)', ringPeak: 'rgba(235,104,123,0.65)', ringOff: 'rgba(246,179,160,0.60)' },
     palette: ['#eb687b', '#f1837b', '#f6b3a0', '#b6b3d6', '#d0cce5', '#f7dfd7', '#d5d3df', '#d6d1d1'],
     alert: { ok: '#6b5f7a', near: '#f6b3a0', over: '#c5304a' },
-    customDefault: { pillFlat: '#b6b3d6', pillPeak: '#eb687b', ringFlat: '#b6b3d6', ringPeak: '#eb687b', ringOff: '#f6b3a0', alertOk: '#6b5f7a', alertNear: '#f6b3a0', alertOver: '#c5304a', textMain: '#4a4458', textModel: '#eb687b', textValue: '#c5304a', textSub: '#9d97ae' },
+    customDefault: { pillFlat: '#eb687b', pillPeak: '#c5304a', ringFlat: '#eb687b', ringPeak: '#c5304a', ringOff: '#f1837b', alertOk: '#6b5f7a', alertNear: '#f6b3a0', alertOver: '#c5304a', textMain: '#4a4458', textModel: '#eb687b', textValue: '#c5304a', textSub: '#9d97ae' },
   },
-  // ── 9) 夏日海滩（浅色）
+  // ── 10) 夏日海滩（浅色）
   {
     id: 'summer-beach', name: '夏日海滩（浅色）',
     bg: 'linear-gradient(180deg, #ffcd92 0%, #fff0d9 45%, #fffaf3 100%)',
@@ -230,9 +244,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(101,189,223,0.28)', peak: 'rgba(253,117,122,0.22)', ringFlat: 'rgba(59,156,200,0.55)', ringPeak: 'rgba(253,117,122,0.65)', ringOff: 'rgba(176,215,170,0.60)' },
     palette: ['#3b9cc8', '#65bddf', '#fd757a', '#fa805e', '#fba270', '#ffcd92', '#b0d7aa', '#fce198'],
     alert: { ok: '#4d9b6e', near: '#fba270', over: '#fd757a' },
-    customDefault: { pillFlat: '#65bddf', pillPeak: '#fd757a', ringFlat: '#3b9cc8', ringPeak: '#fd757a', ringOff: '#b0d7aa', alertOk: '#4d9b6e', alertNear: '#fba270', alertOver: '#fd757a', textMain: '#27404a', textModel: '#3b9cc8', textValue: '#d94f55', textSub: '#86a2ad' },
+    customDefault: { pillFlat: '#3b9cc8', pillPeak: '#3b9cc8', ringFlat: '#3b9cc8', ringPeak: '#3b9cc8', ringOff: '#65bddf', alertOk: '#4d9b6e', alertNear: '#fba270', alertOver: '#fd757a', textMain: '#27404a', textModel: '#3b9cc8', textValue: '#d94f55', textSub: '#86a2ad' },
   },
-  // ── 10) 海洋清风（浅色）
+  // ── 11) 海洋清风（浅色）
   {
     id: 'ocean-breeze', name: '海洋清风（浅色）',
     bg: 'linear-gradient(180deg, #bfdfd2 0%, #e4f2ec 45%, #f7fbf8 100%)',
@@ -244,21 +258,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(124,192,206,0.30)', peak: 'rgba(236,142,90,0.22)', ringFlat: 'rgba(64,152,172,0.55)', ringPeak: 'rgba(236,142,90,0.65)', ringOff: 'rgba(220,201,146,0.60)' },
     palette: ['#4098ac', '#7cc0ce', '#53999d', '#ec8e5a', '#ec9e59', '#ecb66b', '#dcc992', '#bfdfd2'],
     alert: { ok: '#53999d', near: '#ecb66b', over: '#ec8e5a' },
-    customDefault: { pillFlat: '#7cc0ce', pillPeak: '#ec8e5a', ringFlat: '#4098ac', ringPeak: '#ec8e5a', ringOff: '#dcc992', alertOk: '#53999d', alertNear: '#ecb66b', alertOver: '#ec8e5a', textMain: '#21444a', textModel: '#4098ac', textValue: '#c9552e', textSub: '#84a0a6' },
-  },
-  // ── 11) 林滩晓色（浅色）
-  {
-    id: 'forest-beach-dawn', name: '林滩晓色（浅色）',
-    bg: 'linear-gradient(180deg, #e0f4fb 0%, #eef7fb 45%, #f7fafc 100%)',
-    bgSoft: '#eef7fb', border: 'rgba(56,127,182,0.35)',
-    brand: '#387fb6', brand2: '#b33647',
-    text: '#1f3a52', text2: '#4d6579', text3: '#8b9aa8',
-    textMain: '#1f3a52', textModel: '#387fb6', textValue: '#b33647', textSub: '#8b9aa8',
-    accent: 'rgba(56,127,182,0.10)', card: '#ffffff', error: '#b33647', ok: '#639a72',
-    pill: { flat: 'rgba(201,205,208,0.35)', peak: 'rgba(179,54,71,0.25)', ringFlat: 'rgba(56,127,182,0.55)', ringPeak: 'rgba(179,54,71,0.65)', ringOff: 'rgba(215,235,206,0.60)' },
-    palette: ['#387fb6', '#b33647', '#db7268', '#d7ebce', '#f8efb5', '#d9d5b6', '#c9cdd0', '#e0f4fb'],
-    alert: { ok: '#639a72', near: '#db7268', over: '#b33647' },
-    customDefault: { pillFlat: '#c9cdd0', pillPeak: '#b33647', ringFlat: '#387fb6', ringPeak: '#b33647', ringOff: '#d7ebce', alertOk: '#639a72', alertNear: '#db7268', alertOver: '#b33647', textMain: '#1f3a52', textModel: '#387fb6', textValue: '#b33647', textSub: '#8b9aa8' },
+    customDefault: { pillFlat: '#4098ac', pillPeak: '#4098ac', ringFlat: '#4098ac', ringPeak: '#4098ac', ringOff: '#7cc0ce', alertOk: '#53999d', alertNear: '#ecb66b', alertOver: '#ec8e5a', textMain: '#21444a', textModel: '#4098ac', textValue: '#c9552e', textSub: '#84a0a6' },
   },
   // ── 12) 石板灰调（中性）
   {
@@ -272,7 +272,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(100,116,139,0.20)', peak: 'rgba(220,38,38,0.22)', ringFlat: 'rgba(100,116,139,0.55)', ringPeak: 'rgba(220,38,38,0.60)', ringOff: 'rgba(100,116,139,0.65)' },
     palette: ['#5b6b7f', '#8294ab', '#f59e0b', '#16a34a', '#ef4444', '#06b6d4', '#ec4899', '#dc2626', '#8b5cf6', '#14b8a6'],
     alert: { ok: '#15803d', near: '#f59e0b', over: '#b91c1c' },
-    customDefault: { pillFlat: '#5b6b7f', pillPeak: '#dc2626', ringFlat: '#5b6b7f', ringPeak: '#dc2626', ringOff: '#5b6b7f', alertOk: '#15803d', alertNear: '#f59e0b', alertOver: '#b91c1c', textMain: '#1c2127', textModel: '#5b6b7f', textValue: '#5b6b7f', textSub: '#8a929c' },
+    customDefault: { pillFlat: '#5b6b7f', pillPeak: '#5b6b7f', ringFlat: '#5b6b7f', ringPeak: '#5b6b7f', ringOff: '#94a3b8', alertOk: '#15803d', alertNear: '#f59e0b', alertOver: '#b91c1c', textMain: '#1c2127', textModel: '#5b6b7f', textValue: '#5b6b7f', textSub: '#8a929c' },
   },
   // ── 13) 午夜深蓝（暗黑）
   {
@@ -286,7 +286,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(124,140,248,0.20)', peak: 'rgba(244,114,182,0.22)', ringFlat: 'rgba(124,140,248,0.55)', ringPeak: 'rgba(244,114,182,0.65)', ringOff: 'rgba(52,211,153,0.60)' },
     palette: ['#7c8cf8', '#a78bfa', '#fbbf24', '#34d399', '#f87171', '#22d3ee', '#f472b6', '#fb923c', '#c4b5fd', '#2dd4bf'],
     alert: { ok: '#34d399', near: '#fbbf24', over: '#f87171' },
-    customDefault: { pillFlat: '#7c8cf8', pillPeak: '#f472b6', ringFlat: '#7c8cf8', ringPeak: '#f472b6', ringOff: '#34d399', alertOk: '#34d399', alertNear: '#fbbf24', alertOver: '#f87171', textMain: '#e8ecf6', textModel: '#7c8cf8', textValue: '#7c8cf8', textSub: '#7c86a6' },
+    customDefault: { pillFlat: '#7c8cf8', pillPeak: '#7c8cf8', ringFlat: '#7c8cf8', ringPeak: '#7c8cf8', ringOff: '#a5b4fc', alertOk: '#34d399', alertNear: '#fbbf24', alertOver: '#f87171', textMain: '#e8ecf6', textModel: '#7c8cf8', textValue: '#7c8cf8', textSub: '#7c86a6' },
   },
   // ── 14) 深海幽蓝（暗黑）
   {
@@ -300,7 +300,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(56,189,248,0.22)', peak: 'rgba(244,114,182,0.24)', ringFlat: 'rgba(56,189,248,0.55)', ringPeak: 'rgba(244,114,182,0.65)', ringOff: 'rgba(45,212,191,0.60)' },
     palette: ['#38bdf8', '#22d3ee', '#fbbf24', '#2dd4bf', '#fb7185', '#60a5fa', '#f472b6', '#fb923c', '#a78bfa', '#34d399'],
     alert: { ok: '#2dd4bf', near: '#fbbf24', over: '#fb7185' },
-    customDefault: { pillFlat: '#38bdf8', pillPeak: '#f472b6', ringFlat: '#38bdf8', ringPeak: '#fb7185', ringOff: '#2dd4bf', alertOk: '#2dd4bf', alertNear: '#fbbf24', alertOver: '#fb7185', textMain: '#e2f1f8', textModel: '#38bdf8', textValue: '#38bdf8', textSub: '#6f93a4' },
+    customDefault: { pillFlat: '#38bdf8', pillPeak: '#38bdf8', ringFlat: '#38bdf8', ringPeak: '#38bdf8', ringOff: '#7dd3fc', alertOk: '#2dd4bf', alertNear: '#fbbf24', alertOver: '#fb7185', textMain: '#e2f1f8', textModel: '#38bdf8', textValue: '#38bdf8', textSub: '#6f93a4' },
   },
   // ── 15) 森林夜色（暗黑）
   {
@@ -314,7 +314,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(52,211,153,0.22)', peak: 'rgba(244,114,182,0.24)', ringFlat: 'rgba(52,211,153,0.55)', ringPeak: 'rgba(244,114,182,0.65)', ringOff: 'rgba(74,222,128,0.60)' },
     palette: ['#34d399', '#6ee7b7', '#fbbf24', '#4ade80', '#fb7185', '#22d3ee', '#f472b6', '#fb923c', '#86efac', '#2dd4bf'],
     alert: { ok: '#4ade80', near: '#fbbf24', over: '#fb7185' },
-    customDefault: { pillFlat: '#34d399', pillPeak: '#f472b6', ringFlat: '#34d399', ringPeak: '#fb7185', ringOff: '#4ade80', alertOk: '#4ade80', alertNear: '#fbbf24', alertOver: '#fb7185', textMain: '#e3f4ec', textModel: '#34d399', textValue: '#34d399', textSub: '#6e9480' },
+    customDefault: { pillFlat: '#34d399', pillPeak: '#34d399', ringFlat: '#34d399', ringPeak: '#34d399', ringOff: '#6ee7b7', alertOk: '#4ade80', alertNear: '#fbbf24', alertOver: '#fb7185', textMain: '#e3f4ec', textModel: '#34d399', textValue: '#34d399', textSub: '#6e9480' },
   },
   // ── 16) 星夜紫岚（暗黑）
   {
@@ -328,9 +328,9 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(167,139,250,0.22)', peak: 'rgba(244,114,182,0.24)', ringFlat: 'rgba(167,139,250,0.55)', ringPeak: 'rgba(244,114,182,0.65)', ringOff: 'rgba(52,211,153,0.60)' },
     palette: ['#a78bfa', '#c4b5fd', '#fbbf24', '#34d399', '#f87171', '#22d3ee', '#f472b6', '#fb923c', '#818cf8', '#2dd4bf'],
     alert: { ok: '#34d399', near: '#fbbf24', over: '#f87171' },
-    customDefault: { pillFlat: '#a78bfa', pillPeak: '#f472b6', ringFlat: '#a78bfa', ringPeak: '#f472b6', ringOff: '#34d399', alertOk: '#34d399', alertNear: '#fbbf24', alertOver: '#f87171', textMain: '#eee9fb', textModel: '#a78bfa', textValue: '#a78bfa', textSub: '#8a7cb2' },
+    customDefault: { pillFlat: '#a78bfa', pillPeak: '#a78bfa', ringFlat: '#a78bfa', ringPeak: '#a78bfa', ringOff: '#c4b5fd', alertOk: '#34d399', alertNear: '#fbbf24', alertOver: '#f87171', textMain: '#eee9fb', textModel: '#a78bfa', textValue: '#a78bfa', textSub: '#8a7cb2' },
   },
-  // ══ 以下 8 套主题来自 Z:\deepseek\palettes\palettes.json（8 组提取配色，2026-07 新增）。
+  // ══ 以下 8 套主题来自 palettes.json 提取配色（开发者本地开发产物，8 组，2026-07 新增）。
   //    身份色（胶囊/呼吸/品牌/字体分类）= 每组配色的原色；中性色 = 同色系深浅变体。
   // ── 17) 科技未来（暗黑）
   {
@@ -344,7 +344,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(43,125,143,0.30)', peak: 'rgba(248,229,32,0.22)', ringFlat: 'rgba(48,160,131,0.60)', ringPeak: 'rgba(248,229,32,0.70)', ringOff: 'rgba(81,190,100,0.60)' },
     palette: ['#30a083', '#51be64', '#9ed73f', '#f8e520', '#2b7d8f', '#365d8d', '#3f387e', '#430258'],
     alert: { ok: '#51be64', near: '#9ed73f', over: '#f8e520' },
-    customDefault: { pillFlat: '#2b7d8f', pillPeak: '#f8e520', ringFlat: '#30a083', ringPeak: '#f8e520', ringOff: '#51be64', alertOk: '#51be64', alertNear: '#9ed73f', alertOver: '#f8e520', textMain: '#d9f2e4', textModel: '#51be64', textValue: '#f8e520', textSub: '#7fa398' },
+    customDefault: { pillFlat: '#30a083', pillPeak: '#f8e520', ringFlat: '#30a083', ringPeak: '#f8e520', ringOff: '#51be64', alertOk: '#51be64', alertNear: '#9ed73f', alertOver: '#f8e520', textMain: '#d9f2e4', textModel: '#51be64', textValue: '#f8e520', textSub: '#7fa398' },
   },
   // ── 18) 热带森林（暗黑）
   {
@@ -358,7 +358,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(96,170,132,0.25)', peak: 'rgba(229,109,78,0.25)', ringFlat: 'rgba(36,141,130,0.60)', ringPeak: 'rgba(229,109,78,0.65)', ringOff: 'rgba(180,184,127,0.60)' },
     palette: ['#248d82', '#60aa84', '#e56d4e', '#f1a464', '#eabc6b', '#b4b87f', '#407a7f', '#264a56'],
     alert: { ok: '#60aa84', near: '#eabc6b', over: '#e56d4e' },
-    customDefault: { pillFlat: '#60aa84', pillPeak: '#e56d4e', ringFlat: '#248d82', ringPeak: '#e56d4e', ringOff: '#b4b87f', alertOk: '#60aa84', alertNear: '#eabc6b', alertOver: '#e56d4e', textMain: '#e0efe6', textModel: '#60aa84', textValue: '#f1a464', textSub: '#7f9c93' },
+    customDefault: { pillFlat: '#60aa84', pillPeak: '#e56d4e', ringFlat: '#248d82', ringPeak: '#e56d4e', ringOff: '#4a9e8c', alertOk: '#60aa84', alertNear: '#eabc6b', alertOver: '#e56d4e', textMain: '#e0efe6', textModel: '#60aa84', textValue: '#f1a464', textSub: '#7f9c93' },
   },
   // ── 19) 经典红蓝（暗黑）
   {
@@ -372,7 +372,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(45,90,116,0.35)', peak: 'rgba(195,51,59,0.30)', ringFlat: 'rgba(81,149,194,0.60)', ringPeak: 'rgba(195,51,59,0.70)', ringOff: 'rgba(234,179,164,0.55)' },
     palette: ['#5195c2', '#2d5a74', '#c3333b', '#a00514', '#7c0302', '#eab3a4', '#b6b6b2', '#224e5d'],
     alert: { ok: '#b6b6b2', near: '#eab3a4', over: '#c3333b' },
-    customDefault: { pillFlat: '#2d5a74', pillPeak: '#c3333b', ringFlat: '#5195c2', ringPeak: '#c3333b', ringOff: '#eab3a4', alertOk: '#b6b6b2', alertNear: '#eab3a4', alertOver: '#c3333b', textMain: '#e6eef4', textModel: '#5195c2', textValue: '#eab3a4', textSub: '#7f95a3' },
+    customDefault: { pillFlat: '#5195c2', pillPeak: '#c3333b', ringFlat: '#5195c2', ringPeak: '#c3333b', ringOff: '#6fb3d6', alertOk: '#b6b6b2', alertNear: '#eab3a4', alertOver: '#c3333b', textMain: '#e6eef4', textModel: '#5195c2', textValue: '#eab3a4', textSub: '#7f95a3' },
   },
   // ── 20) 紫夜曙光（暗黑）
   {
@@ -386,7 +386,7 @@ export const THEMES: Theme[] = [
     pill: { flat: 'rgba(163,31,151,0.30)', peak: 'rgba(240,137,70,0.25)', ringFlat: 'rgba(163,31,151,0.60)', ringPeak: 'rgba(240,137,70,0.70)', ringOff: 'rgba(252,180,51,0.55)' },
     palette: ['#f08946', '#fcb433', '#c5437a', '#dd6462', '#a31f97', '#7907a8', '#4b03a1', '#170489'],
     alert: { ok: '#fcb433', near: '#f08946', over: '#dd6462' },
-    customDefault: { pillFlat: '#a31f97', pillPeak: '#f08946', ringFlat: '#a31f97', ringPeak: '#f08946', ringOff: '#fcb433', alertOk: '#fcb433', alertNear: '#f08946', alertOver: '#dd6462', textMain: '#efe6f7', textModel: '#f08946', textValue: '#fcb433', textSub: '#907aa8' },
+    customDefault: { pillFlat: '#8a5cf5', pillPeak: '#f08946', ringFlat: '#8a5cf5', ringPeak: '#f08946', ringOff: '#fcb433', alertOk: '#fcb433', alertNear: '#f08946', alertOver: '#dd6462', textMain: '#efe6f7', textModel: '#f08946', textValue: '#fcb433', textSub: '#907aa8' },
   },
 ];
 

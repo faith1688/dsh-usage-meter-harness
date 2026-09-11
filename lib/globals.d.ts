@@ -6,6 +6,8 @@
  *     balance-tier label (capsule balance chip, settings page, etc).
  *  2) Token-rate tier (slow 0–50 / mid 51–100 / fast 101+ tokens/s) — applied
  *     to the speed number in the capsule and the popup.
+ *  3) Balance amount (余额足) — the capsule's balance amount text + chip tint
+ *     (v2.0.32: theme alert.ok read too dark; dedicated base, brighter default).
  *
  * Renders stay "炫彩" even though the storage values are plain hex — at display
  * time each tier is interpolated with the *active theme* brand endpoints to
@@ -25,6 +27,7 @@ export interface GlobalColors {
     alertOk: string;
     alertNear: string;
     alertOver: string;
+    balanceOk: string;
     speedLow: string;
     speedMid: string;
     speedHi: string;

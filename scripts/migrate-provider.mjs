@@ -21,7 +21,7 @@
  *   6. usage-meter/stats.json: same token rewrite (stats keys carry the provider id).
  *   7. usage-meter/apikeys/: renames `deepseek__*.enc` → `deepseekcustom__*.enc`.
  *
- * Run AFTER closing DSH:  node Z:\deepseek\dsh-usage-meter\scripts\migrate-provider.mjs
+ * Run AFTER closing DSH (from the repo root):  node scripts/migrate-provider.mjs
  */
 import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
