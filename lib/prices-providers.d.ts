@@ -28,7 +28,7 @@ export interface PricingRow {
     peakOffPeakFrom?: number;
     /** Beijing weekdays (0=Sun..6=Sat) with peak/off-peak split; days not listed are flat. */
     peakDays?: number[];
-    /** Peak-hour windows in Beijing hours [0,24). */
+    /** Peak-hour windows in Beijing MINUTES since midnight (9:00-12:00 = start 540 / end 720). */
     peakWindows?: Array<{
         start: number;
         end: number;

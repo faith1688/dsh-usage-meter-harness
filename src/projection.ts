@@ -47,7 +47,7 @@ export interface ModelPricing {
    * applies; days NOT listed (e.g. Sat/Sun) are billed flat. Omit → all 7 days split.
    */
   peakDays?: number[];
-  /** Peak-hour windows in BEIJING hours [0,24); e.g. [{start:9,end:12},{start:14,end:18}]. */
+  /** Peak-hour windows in BEIJING MINUTES since midnight; 9:00-12:00 = start 540 / end 720. */
   peakWindows?: Array<{ start: number; end: number }>;
   /** Flat per-token rate for days NOT in `peakDays` (weekend); falls back to `offPeak` when absent. */
   weekend?: PeakRates;

@@ -139,6 +139,7 @@ in `node_modules`.
 | 6 billing templates | Basic · Cache hit/miss · Peak/off-peak (DeepSeek official hours) · Cache write+hit · Combined input+output · Batch half price |
 | Custom price rows | Up to 4 user-defined rows; the popup mirrors your setup verbatim |
 | Peak/off-peak billing | Beijing-time weekday + hour windows, cross-midnight supported; each request is billed by its start time |
+| Accurate turn attribution | Each turn is billed to the model that actually ran it — switching models mid-session never re-labels open or finished turns; the turn's currency is fixed at its first billed usage, so USD-priced turns convert correctly |
 | Per-model pricing | Currency (CNY/USD), unit prices and balance per model |
 | Shared provider wallet | One balance shared by all models of a provider — single checkbox |
 | Official price prefill | DeepSeek official models come pre-filled with official prices and the official peak schedule |
@@ -152,6 +153,7 @@ in `node_modules`.
 | Feature | Description |
 | --- | --- |
 | Bilingual UI | Language switch at the top-right of the settings page: Follow system / 中文 / English; applies everywhere instantly (popup included) and the choice is remembered. Display only — saved data never changes |
+| Themes | 20 built-in themes (light first, dark after; default forest-beach-dawn) plus per-theme custom pill & breathing colors — quick switch at the top of the usage popup, full palette on the settings page, saved locally |
 | In-use lock | While a model is generating, its editor is locked so a running turn keeps consistent prices |
 | WYSIWYG popup | Usage-card rows are copied verbatim from your template selection |
 | Non-intrusive | Standard DSH cordis plugin; touches no other plugin and no DSH core files |

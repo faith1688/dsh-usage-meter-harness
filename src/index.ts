@@ -254,7 +254,7 @@ const thresholds: Record<string, ThreshDef> = {};
 /** 用量看板聚合：按 (底层 provider, model) 累计真实 token/费用（只读会话事件，不碰计费/余额）。 */
 interface StatsBucket { provider: string; model: string; requestCount: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; cost: number; inputCost: number; cacheReadCost: number; cacheWriteCost: number; outputCost: number; currency: string; updatedAt: number }
 const stats: Record<string, StatsBucket> = {};
-const lastStatsBySession = new WeakMap<object, { provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>();
+const lastStatsBySession = new WeakMap<object, { turn: number; step: number; provider: string; model: string; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }>();
 let statsDirty = false;
 function statsPath(): string { return join(dataRoot(), 'stats.json'); }
 function saveStats(): void {
@@ -534,6 +534,9 @@ function peakActiveBJ(pricing: ModelPricing | null | undefined, now: number): bo
   const wins = pricing.peakWindows ?? [{ start: 540, end: 720 }, { start: 840, end: 1080 }];
   // 与 prices.ts 的 resolvePricingForTime 同一套语义（含跨零点环绕窗口）。
   return wins.some((w) => {
+    // 退化窗口 [x,x) 是空集：畸形 override（API 直写/手改 JSON）写成 start===end 时，
+    // 原判定 `min >= start` 与 `min < end` 恰好拼满全天 → 全天按峰价。视作无窗口。
+    if (w.start === w.end) return false;
     if (w.start < w.end) return days.includes(day) && min >= w.start && min < w.end;
     if (min >= w.start) return days.includes(day);
     if (min < w.end) return days.includes((day + 6) % 7);
@@ -1091,12 +1094,21 @@ function addToLastTurn(turns: FoldTurn[], delta: { input: number; output: number
   const last = turns[turns.length - 1];
   if (last === undefined) return turns;
   const next = [...turns];
+  // v2.0.35：回合币种 = 本回合「首个计费用量」的定价币种，之后永不改写
+  // （v2.0.16 语义，回合内切模型时 cost 是多币种之和，换算以第一个请求为准）。
+  // 此前该语义只写在注释里：参数 currency 从未被使用，回合币种一直是 turn/start
+  // 硬编码的 CNY，美元定价的回合被当人民币累计 → 显示总额不换算（差一个汇率）。
+  const firstBilling = last.input === 0 && last.output === 0 && last.cacheRead === 0 && last.cacheWrite === 0 && last.reasoning === 0;
   next[next.length - 1] = {
     ...last,
+    ...(firstBilling ? { currency } : {}),
     cost: last.cost + costBy.total,
     // v2.0.16: 保留本回合首个计费用法的币种（...last 已带入），不再被最后一个
     // usage 覆盖：回合内切换模型时 cost 是多币种金额之和，显示换算以「首个
     // 请求」的币种为准（与回合归因 = 首个请求模型的语义一致）。
+    // peak 则相反：回合创建时按时钟判定（模型未知时为 false），之后每条计费
+    // usage 覆盖一次。跨峰谷边界的回合，徽章显示「最后一个计费请求」的峰谷态，
+    // 费用仍逐请求计价——单布尔量表达不了混合态，此处刻意取末态。
     peak,
     input: last.input + delta.input,
     output: last.output + delta.output,
@@ -1108,6 +1120,24 @@ function addToLastTurn(turns: FoldTurn[], delta: { input: number; output: number
     cacheWriteCost: last.cacheWriteCost + costBy.cacheWrite,
     outputCost: last.outputCost + costBy.output,
   };
+  return next;
+}
+
+/** v2.0.35 回合归因：turn/start 先于本回合的 request/header 到达（实测同一毫秒内亦然），
+ *  所以建桶时只能用 state 里「上一个已知模型」打一个暂定标。本回合第一个真正产生
+ *  用量的请求（model/selection 或 request/header）到达后即定标，此后永不改写
+ *  —— v2.0.14：中途切模型不能把整轮费用算到新模型头上。
+ *  返回原数组表示无需改动（保持 fold「无变化即返回原 state」的语义）。 */
+function stampOpenTurn(turns: FoldTurn[], provider: string | null, model: string | null, at: number): FoldTurn[] {
+  const open = turns[turns.length - 1];
+  if (open === undefined || open.endedAt !== 0) return turns;
+  if (provider === null && model === null) return turns;
+  // 已产生过计费用量 → 本回合归属已定。
+  if (open.input !== 0 || open.output !== 0 || open.cacheRead !== 0 || open.cacheWrite !== 0) return turns;
+  if (open.provider === provider && open.model === model) return turns;
+  const tp = pricingFor(provider, model, at);
+  const next = [...turns];
+  next[next.length - 1] = { ...open, provider, model, peak: tp !== null && peakActiveBJ(tp, at) };
   return next;
 }
 
@@ -1252,19 +1282,31 @@ const usageCostProjection = {
       if (provider !== state.provider || model !== state.model) {
         next = { ...next, provider, model };
       }
-      // 回合归因固定为「实际发起本回合第一个请求的模型」（v2.0.14 修复）：
-      // 回合中途切换模型时，新模型的 request/header 到达不再改写已打开 turn 桶的
-      // model/provider——否则本回合全部费用都会被记到切换后的模型名下，与真正
-      // 干活的模型不符（用户实测：切到快结束时切模型，整轮费用全算给了新模型）。
-      // 仅在 turn 桶还没有模型时回填（如会话第一个回合 turn/start 时尚无模型）；
-      // 一旦回填永不改写。逐条 usage 的计费仍用 state.provider/model：实测每个 step
-      // 恰好一个 header，且 usage 总在下一个 step 的 header 之前到达，所以 usage
-      // 事件时刻的 state 就是产生该 usage 的那个请求的模型，逐请求计费天然正确。
-      const open = next.turns[next.turns.length - 1];
-      if (open !== undefined && open.endedAt === 0 && (open.model === null || open.provider === null) && (model !== null || provider !== null)) {
-        const turns = [...next.turns];
-        turns[turns.length - 1] = { ...open, model, provider };
-        next = { ...next, turns };
+      // 回合归因 = 「本回合第一个真正产生用量的请求」的模型（v2.0.14 修复）：
+      // 一旦该回合已有计费 usage，model/provider 即定标，中途切模型不再改写——否则
+      // 本回合全部费用都会被记到切换后的模型名下，与真正干活的模型不符。
+      // 定标前（本回合还没有任何用量）header 仍可改写：turn/start 先于本回合
+      // header 到达，所以这里不是兜底而是常态路径。
+      // 逐条 usage 的计费仍用 state.provider/model：实测每个 step 恰好一个 header，
+      // 且 usage 总在下一个 step 的 header 之前到达，所以 usage 事件时刻的 state
+      // 就是产生该 usage 的那个请求的模型，逐请求计费天然正确。
+      const stamped = stampOpenTurn(next.turns, provider, model, event.time);
+      if (stamped !== next.turns) next = { ...next, turns: stamped };
+    }
+    // v2.0.35：用户/运行时选定模型（DSH 官方 session 事件，
+    // data = {provider, model, reasoningEffort?}）。
+    // v3 日志里 request/header 很稀疏（只记变化），切模型的事实记录在这里；而
+    // turn/start 又先于本回合 header 到达，所以必须在 turn/start 之前把 state 更新掉，
+    // 新建的回合桶才能打上真正要跑的那个模型——否则整回合沿用上一回合的模型
+    // （用户实测：切到 deepseek-flash 后正在跑的第 80 轮仍显示 ngrok-ollama/Qwen3.8-27B）。
+    if (event.type === 'model/selection') {
+      const sel = event.data as { provider?: unknown; model?: unknown };
+      const p = typeof sel.provider === 'string' && sel.provider !== '' ? sel.provider : null;
+      const m = typeof sel.model === 'string' && sel.model !== '' ? sel.model : null;
+      if (p !== null && m !== null) {
+        if (p !== state.provider || m !== state.model) next = { ...next, provider: p, model: m };
+        const stamped = stampOpenTurn(next.turns, p, m, event.time);
+        if (stamped !== next.turns) next = { ...next, turns: stamped };
       }
     }
     // DeepSeek sends final usage only at [DONE]. Estimate streamed output from
@@ -1290,7 +1332,10 @@ const usageCostProjection = {
           turns: [...next.turns, {
             turn,
             input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0,
-            cost: 0, currency: 'CNY', model: state.model, provider: state.provider,
+            // currency 只是暂定：本回合首个计费用量到达时由 addToLastTurn 按真实
+            // 定价币种定标。model/provider 同理是暂定标——本回合的 request/header /
+            // model/selection 随后经 stampOpenTurn 定标（见该函数注释）。
+            cost: 0, currency: tp?.currency ?? 'CNY', model: state.model, provider: state.provider,
             // v2.0.31: 回合创建即按时钟判定峰谷（与计费同一 peakActiveBJ 判定）。
             // 此前硬编码 peak:false，徽章要等首个 usage 事件到达才翻正，
             // 流式期间高峰期也先显示"谷"。
@@ -1712,12 +1757,25 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       const pv = alias !== null ? alias.provider : provider;
       const md = alias !== null ? alias.model : model;
       const real = underlyingProvider(pv) ?? pv;
+      // 基线 = 同 (turn, step) 的上一条样本（与钱包路径同一套去重语义）。
+      // 只按桶值比较曾有三处漏计：①会话中途切模型命中 provider/model 早退，
+      // 且基线永不更新 → 该会话看板此后全部样本被丢；②新 step 的首条样本若小于
+      // 上一步的末条样本，delta 被 clamp 成 0 → 该步首段用量永久漏计；
+      // ③相邻两步 usage 恰好全等时后者被误判为重复样本。
       const prev = lastStatsBySession.get(session);
-      if (prev !== undefined && (prev.provider !== provider || prev.model !== model || (prev.input === b.input && prev.output === b.output && prev.cacheRead === b.cacheRead && prev.cacheWrite === b.cacheWrite && prev.reasoning === b.reasoning))) return;
-      const delta = deltaOf(prev !== undefined && prev.provider === provider && prev.model === model ? { input: prev.input, output: prev.output, cacheRead: prev.cacheRead, cacheWrite: prev.cacheWrite, reasoning: prev.reasoning } : null, b);
-      lastStatsBySession.set(session, { provider, model, input: b.input, output: b.output, cacheRead: b.cacheRead, cacheWrite: b.cacheWrite, reasoning: b.reasoning });
+      const base = prev !== undefined && prev.turn === ue.turn && prev.step === ue.step ? prev : null;
+      const sameSample = base !== null && base.provider === provider && base.model === model &&
+        base.input === b.input && base.output === b.output &&
+        base.cacheRead === b.cacheRead && base.cacheWrite === b.cacheWrite && base.reasoning === b.reasoning;
+      if (sameSample) return;
+      const delta = deltaOf(base, b);
+      lastStatsBySession.set(session, { turn: ue.turn, step: ue.step, provider, model, input: b.input, output: b.output, cacheRead: b.cacheRead, cacheWrite: b.cacheWrite, reasoning: b.reasoning });
       if (delta.input === 0 && delta.output === 0 && delta.cacheRead === 0 && delta.cacheWrite === 0 && delta.reasoning === 0) return;
-      const pricing = pricingFor(provider, model, (event as { time?: number }).time ?? Date.now());
+      // 与钱包/projection 同一计费时刻：用 step 起始时刻而非 usage 事件到达时刻——
+      // 11:59（峰）发起、12:01（谷）才收到 usage 的请求，两本账必须用同一个时钟定价。
+      const ss = stepStartBySession.get(session);
+      const requestStart = ss !== undefined && ss.turn === ue.turn && ss.step === ue.step ? ss.at : event.time;
+      const pricing = pricingFor(provider, model, requestStart);
       const bd = pricing === null ? null : costBreakdown({ inputTokens: delta.input, outputTokens: delta.output, cacheReadTokens: delta.cacheRead, cacheWriteTokens: delta.cacheWrite }, pricing);
       const deltaCost = bd === null ? 0 : bd.total;
       const currency = pricing?.currency ?? 'CNY';
@@ -1727,7 +1785,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       cur.inputTokens += delta.input; cur.outputTokens += delta.output; cur.cacheReadTokens += delta.cacheRead; cur.cacheWriteTokens += delta.cacheWrite; cur.reasoningTokens += delta.reasoning;
       cur.cost += deltaCost;
       if (bd !== null) { cur.inputCost += bd.input; cur.cacheReadCost += bd.cacheRead; cur.cacheWriteCost += bd.cacheWrite; cur.outputCost += bd.output; }
-      cur.currency = currency; cur.updatedAt = Date.now(); statsDirty = true;
+      // 保留桶首次创建时的币种：把已累计（可能是混币）的金额按最新 pricing 重新
+      // 打标会误标历史数据；与每轮账本「保留首个计费用量币种」语义一致。
+      cur.updatedAt = Date.now(); statsDirty = true;
     } catch { /* ignore */ }
   });
   // 用看板统计的周期性持久化（每 5s flush；进程退出也 flush）。

@@ -6,7 +6,7 @@ export declare function isPeakHour(utcHour: number): boolean;
 /** Resolve one pricing row to the rate active at `now` (peak/off-peak when applicable).
  *
  * Weekday-aware (BEIJING day & hour): if the current BEIJING weekday is in
- * `pricing.peakDays`, the peak/off-peak windows (BEIJING hours) apply; a day
+ * `pricing.peakDays`, the peak/off-peak windows (BEIJING minutes) apply; a day
  * NOT in `peakDays` (e.g. Sat/Sun) is billed flat with `weekend ?? offPeak`.
  */
 export declare function resolvePricingForTime(pricing: ModelPricing, now: number): ModelPricing;

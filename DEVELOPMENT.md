@@ -83,14 +83,14 @@ dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@latest
    若含 `usage-meter` → 跑 `scripts/fix-duplicate.ps1` 删除（一次性）。
 2. **显式带版本号更新**（命令里 `@<版本>` 一律填**本次发布的确切版本号**）：
    ```
-   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@2.0.16
+   dsh plugin --profile web add @faith1688/dsh-usage-meter-harness@2.0.35
    ```
    （历史示例：升到 1.0.31 用 `...@1.0.31`；升到 1.0.32 用 `...@1.0.32`；升到
-   1.0.33 用 `...@1.0.33`；升到 2.0.13 用 `...@2.0.13`；升到 2.0.14 用 `...@2.0.14`；升到 2.0.15 用 `...@2.0.15`；升到 2.0.16 用 `...@2.0.16`。
+   1.0.33 用 `...@1.0.33`；升到 2.0.13 用 `...@2.0.13`；升到 2.0.14 用 `...@2.0.14`；升到 2.0.15 用 `...@2.0.15`；升到 2.0.16 用 `...@2.0.16`；升到 2.0.35 用 `...@2.0.35`。
    发布下一个版本时，把这里改成那次的新号，别留着旧号误导后续升级。）
 3. 重启 `dsh web`。**重启本身不会拉新版本**，必须先装进 node_modules。
 
-> **若 `add @2.0.16` 也被判 Already up to date**（说明 profile 里有 `file:` 或
+> **若 `add @2.0.35` 也被判 Already up to date**（说明 profile 里有 `file:` 或
 > `^` 之外的固定绑定）：改用一键安装器 `npx -y @faith1688/dsh-usage-meter-harness@latest`，
 > 它会强制把绑定改写为 `^<最新>` 并升级（v1.0.32 起支持，实测 `file:`→`^` 一键完成）。
 
