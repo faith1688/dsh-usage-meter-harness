@@ -48,8 +48,15 @@ import { matchTypeId } from './billing.ts';
 import { THEMES, themeOf, resolveTheme, getThemeState, setThemeState, DEFAULT_CUSTOM, THEME_CHANGE, withAlpha, type Theme, type ThemeCustom, type ThemeState } from './theme.ts';
 import { getGlobalColors, setGlobalColors, GLOBAL_COLORS_CHANGE, DEFAULT_GLOBAL_COLORS, tierGradient, lightenHex, normalizeHex, getFontMode, setFontMode, fontStackOf, getFontCustom, setFontCustom, fontStackForCategory, fontWeightForCategory, FONT_WEIGHT_OPTIONS, FONT_CUSTOM_DEFAULT, COMMON_SYSTEM_FONTS, isFontAvailable, FONT_MODE_CHANGE, estTokens, liveOutputRate, type RateSample, type GlobalColors, type FontMode, type FontCustom } from './globals.ts';
 
-/** Services this client plugin requires on `ctx`. */
-export const inject = ['slots', 'locale'];
+/**
+ * Services this client plugin requires on `ctx`.
+ *
+ * ONLY `slots` is required. `locale` is deliberately NOT declared: it is read
+ * through an optional probe in `apply` below. cordis has no optional inject —
+ * a declared service that a composition never provides keeps `apply` from
+ * running at all, and the readout would silently never exist on that shell.
+ */
+export const inject = ['slots'];
 
 /**
  * Live stream speed source. The installed 0.1.5 dock kit passes a `useChat`
@@ -66,6 +73,10 @@ type UseChatLike = <S>(sel: (s: LiveChatState) => S) => S;
 const NOOP_USE_CHAT: UseChatLike = (sel) => sel({});
 
 type DockProps = PropsRuntime<'conversation.composer.dock'> & { useChat?: UseChatLike };
+
+/** Empty projection fallback: a shell whose dock kit ships no `useProjection`. */
+const NOOP_USE_PROJECTION = <T,>(_key: string): T | undefined => undefined;
+type UseProjectionLike = (key: string) => UsageCostValue | undefined;
 
 export function apply(ctx: ClientContext): void {
   // Wrap in slots.inject so registration waits for the dock seat's declaration
@@ -409,7 +420,12 @@ function peakLabel(p: ModelPricing | null): string | null {
 
 // ── readout ──────────────────────────────────────────────────────────────────
 export function UsageReadout({ useProjection, useChat }: DockProps): ReactElement | null {
-  const usage: UsageCostValue | undefined = useProjection('usageCost');
+  // `useProjection` comes from the host's dock standard kit and is
+  // version-dependent: a shell that ships none must still render the readout
+  // (with empty numbers) rather than throw inside the dock entry and take the
+  // whole band down. Same defensive shape as the `useChat` fallback below.
+  const readProjection = (useProjection ?? NOOP_USE_PROJECTION) as UseProjectionLike;
+  const usage: UsageCostValue | undefined = readProjection('usageCost');
   // 实时 tok/s 有两个来源，各自独立成窗（本行是①，下方 srvSamplesRef 是②）：
   //   ① 客户端直播流 partial（本行）——浏览器侧最灵敏；
   //   ② 宿主投影 realtimeOutputTokens/realtimeUpdatedAt —— index.ts 在每个流式文本事件上

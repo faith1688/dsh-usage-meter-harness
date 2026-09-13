@@ -20,7 +20,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         };
     }
 }
-/** Services this client plugin requires on `ctx`. */
+/**
+ * Services this client plugin requires on `ctx`.
+ *
+ * ONLY `slots` is required. `locale` is deliberately NOT declared: it is read
+ * through an optional probe in `apply` below. cordis has no optional inject —
+ * a declared service that a composition never provides keeps `apply` from
+ * running at all, and the readout would silently never exist on that shell.
+ */
 export declare const inject: string[];
 /**
  * Live stream speed source. The installed 0.1.5 dock kit passes a `useChat`

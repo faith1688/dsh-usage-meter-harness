@@ -91,8 +91,18 @@ const Config = z.object({
 /** Stable Cordis plugin name. */
 export const name = 'usage-meter';
 
-/** Required services: settings (config namespace), projection registry, webserver (config route). */
-export const inject = ['settings', 'sessionProjections', 'webServer', 'llm'];
+/**
+ * Required services. Only the two the meter cannot work without.
+ *
+ * `webServer` and `llm` are deliberately NOT declared here, for the same reason
+ * the client plugin does not declare `locale`: cordis has no optional inject, so
+ * a declared service that a composition never provides parks this plugin in
+ * PENDING forever — `apply` never runs and the plugin silently does not exist.
+ * Both are read through `ctx.get(...)` probes below instead: with no webServer
+ * the HTTP settings routes are skipped (the readout and the projection still
+ * work), with no llm the provider/model listing degrades to empty.
+ */
+export const inject = ['settings', 'sessionProjections'];
 
 // Ambient runtime facts the (pure, module-level) projection `view` reads. The
 // cfg-owned fields (priceSourceUrl / refreshIntervalMs / deepseekApiKey) are
@@ -1725,8 +1735,26 @@ class UsageMeterCore {
 
 /** Plugin entry: provide the service, register settings + the projection. */
 export function apply(ctx: Context, config: Record<string, unknown> = {}): void {
-
-
+  // Optional capabilities, probed instead of injected (see the `inject` note
+  // above). `webServer` absent ⇒ the HTTP settings/price routes below are
+  // skipped with a warning; the projection, the readout and the ledger are
+  // unaffected. `llm` is probed at call time inside those same handlers.
+  const readService = (name: string): unknown => {
+    const c = ctx as unknown as { get?: (n: string) => unknown } & Record<string, unknown>;
+    // Modern cordis exposes `ctx.get(name)` through its reflection layer. Fall
+    // back to a guarded property read when that helper is missing: without the
+    // guard, a context shape we did not anticipate would throw right here and
+    // take the whole `apply` down — worse than the silent-pending case this
+    // probe exists to fix. An uninjected property read throws, hence the catch.
+    if (typeof c.get === 'function') {
+      try { return c.get(name); } catch { /* fall through to the property read */ }
+    }
+    try { return c[name]; } catch { return undefined; }
+  };
+  const httpServer = readService('webServer') as { register(route: unknown): unknown } | undefined;
+  if (httpServer === undefined) {
+    console.warn('[usage-meter] webServer service is absent in this composition — HTTP routes disabled (readout and accounting still active).');
+  }
 
   // 包装标记先于持久化数据解析：老数据里包装路由的定价/余额/Key/统计键要在
   // 读取时就归一回底层，否则历史配置变孤儿（组合入口的 config 只作为兜底，
@@ -1879,7 +1907,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   ctx.sessionProjections.register(usageCostProjection);
 
   // Billing-method templates for the popup dropdown.
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/templates',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1889,7 +1917,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // Force a fresh USD→CNY rate on demand (popup currency switch).
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/active',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1897,7 +1925,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       res.end(JSON.stringify({ active: activeModel }));
     },
   });
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/refresh-rate',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1910,7 +1938,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // 一键同步官方价格：抓官网价格页 → 解析价格表（rowspan 网格）+ 注释(3)峰谷窗口，
   // 写入本机官方模型的价格 override。绝不编造数字：解析不出的模型跳过并告警，
   // 窗口解析失败则保留本机现有窗口；页面结构变化时原样返回 warnings。
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/refresh-official-prices',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1943,17 +1971,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
           return;
         }
         // 本机 DeepSeek 官方模型清单（包装提供商归并到底层、剥包装标记，与 /models 同语义）。
-        const llm = ctx.llm as {
+        const llm = readService('llm') as {
           listProviders: () => Array<{ id: string; name: string }>;
           listModels: (p: string) => Promise<Array<{ id: string; name: string }>>;
-        };
+        } | undefined;
         const local: Array<{ provider: string; model: string }> = [];
-        for (const p of llm.listProviders()) {
+        for (const p of llm?.listProviders() ?? []) {
           const base = underlyingProvider(p.id) ?? p.id;
           if (base !== 'deepseek-official') continue;
           let models: Array<{ id: string }> = [];
           try {
-            models = await llm.listModels(p.id);
+            models = (await llm?.listModels(p.id)) ?? [];
           } catch {
             models = [];
           }
@@ -2008,7 +2036,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // Config channel: a small HTTP endpoint so the browser popup can save config.
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/config',
     handler: async (req: { method?: string; [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2215,7 +2243,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // ── 计费配置目录：导出/列出/从目录导入/删除（同一持久目录，浏览器 ↔ 宿主）──
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/export-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2271,7 +2299,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/delete-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2295,7 +2323,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/list-configs',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2320,7 +2348,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/import-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2359,7 +2387,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
 
   // Model-directory channel: expose provider → models (from the DSH LLM runtime)
   // so the settings "供应商定价管理" block can build its provider/model UI.
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/stats',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2370,7 +2398,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  ctx.webServer.register({
+  httpServer?.register({
     kind: 'exact',
     path: '/api/usage-meter/models',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2379,10 +2407,14 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
         res.end(JSON.stringify(doc as string | undefined));
       };
       try {
-        const llm = ctx.llm as {
+        const llm = readService('llm') as {
           listProviders: () => Array<{ id: string; name: string }>;
           listModels: (p: string) => Promise<Array<{ id: string; name: string }>>;
-        };
+        } | undefined;
+        if (llm === undefined) {
+          send(503, { ok: false, error: 'LLM 服务不可用：该组合未提供 llm。' });
+          return;
+        }
         const providers: Array<{ provider: string; label: string; models: Array<{ model: string; label: string }> }> = [];
         // 包装提供商（modlens-* / *-modlens / vision-toolkit-*）归并到底层提供商：
         // 模型 id 本来就一样，包装只多一个 id。这样设置页只显示一份「同一个提供商」，
@@ -2414,7 +2446,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  console.log('[usage-meter] config route registered at /api/usage-meter/config');
+  // Honest report: claim the routes only when the service was actually there.
+  // The degraded case already warned at the top of `apply` — printing
+  // "registered" unconditionally is how a skipped registration reads as success.
+  if (httpServer !== undefined) {
+    console.log('[usage-meter] HTTP routes registered (config/price/stats/models endpoints active).');
+  }
   currentPrices.updatedAt = Date.now();
   ctx.effect(() => {
     // v2.0.16: 下限保护（schema 不动，避免拒载已保存的旧配置）：

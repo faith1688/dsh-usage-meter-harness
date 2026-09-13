@@ -81,7 +81,17 @@ declare const Config: z<Schemastery.ObjectS<{
 }>>;
 /** Stable Cordis plugin name. */
 export declare const name = "usage-meter";
-/** Required services: settings (config namespace), projection registry, webserver (config route). */
+/**
+ * Required services. Only the two the meter cannot work without.
+ *
+ * `webServer` and `llm` are deliberately NOT declared here, for the same reason
+ * the client plugin does not declare `locale`: cordis has no optional inject, so
+ * a declared service that a composition never provides parks this plugin in
+ * PENDING forever — `apply` never runs and the plugin silently does not exist.
+ * Both are read through `ctx.get(...)` probes below instead: with no webServer
+ * the HTTP settings routes are skipped (the readout and the projection still
+ * work), with no llm the provider/model listing degrades to empty.
+ */
 export declare const inject: string[];
 /** 用量看板聚合：按 (底层 provider, model) 累计真实 token/费用（只读会话事件，不碰计费/余额）。 */
 interface StatsBucket {

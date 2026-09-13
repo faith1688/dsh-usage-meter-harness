@@ -84,6 +84,9 @@ const ctx = {
   on(type, handler) {
     handlers[type] = handler;
   },
+  // 真机 ctx 有反射层 get()（插件用它做能力探测）。替身也必须提供，
+  // 否则插件只会走到回退分支，测试覆盖不到真实路径。
+  get(name) { return ctx[name]; },
 };
 
 apply(ctx, {});

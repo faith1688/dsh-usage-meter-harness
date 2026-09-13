@@ -63,6 +63,9 @@ const ctx = {
   sessionProjections: { register(p) { proj = p; }, snapshot: () => ({ values: { usageCost: { provider: view.provider, model: view.model } } }) },
   webServer: { register() {} },
   llm: { listProviders: () => [], listModels: async () => [] },
+  // 真机 ctx 有反射层 get()（插件用它做能力探测）。替身也必须提供，
+  // 否则插件只会走到回退分支，测试覆盖不到真实路径。
+  get(name) { return ctx[name]; },
 };
 apply(ctx, {});
 eq('0a', '注册到 2 个 session/event 处理器（看板 + 钱包）', handlers.length, 2);
