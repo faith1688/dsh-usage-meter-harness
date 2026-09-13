@@ -429,10 +429,12 @@ function peakLabel(p: ModelPricing | null): string | null {
 // ── readout ──────────────────────────────────────────────────────────────────
 export function UsageReadout({ useProjection, useChat }: DockProps): ReactElement | null {
   const usage: UsageCostValue | undefined = useProjection('usageCost');
-  // Live stream partial (republished per visible chunk) — the source of the
-  // live tok/s rate. The server-side `realtimeOutputTokens` projection is not
-  // updated mid-turn by the installed 0.1.5 runner, so the rate is computed
-  // client-side from this partial instead.
+  // 实时 tok/s 有两个来源，各自独立成窗（本行是①，下方 srvSamplesRef 是②）：
+  //   ① 客户端直播流 partial（本行）——浏览器侧最灵敏；
+  //   ② 宿主投影 realtimeOutputTokens/realtimeUpdatedAt —— index.ts 在每个流式文本事件上
+  //      累加（index.ts:1320 用的是同一个 estTokens），所以**宿主侧同样有实时数据**。
+  // 注意：此处曾有一条注释称"0.1.5 runner 不 mid-turn 更新该投影"，与现实现不符；
+  // 据此删掉②之后，凡是读不到 ① 的机器（不同 DSH 运行时 / 远程端）速度恒显示 0.0。
   const livePartial = (useChat ?? NOOP_USE_CHAT)((s) => s.legacy?.partial ?? null);
 const [, setLangTick] = useState(0);
 useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventListener('um-lang-change', h); return () => window.removeEventListener('um-lang-change', h); }, []);
@@ -542,6 +544,25 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
     if (last === undefined || last.total !== total) samples.push({ at: Date.now(), total });
   }, [livePartial]);
 
+  // 采样源 2：宿主投影的实时输出 token（v1.0.34 时代的速度来源，投影里至今仍在，
+  // 见 projection.ts 的 realtimeOutputTokens / realtimeUpdatedAt）。有些机器读不到
+  // 客户端 live partial（不同 DSH 运行时 / 远程端 / useChat 未注入）——那时只有它
+  // 能给出真实时速度。此前这段被删掉、只剩直播流一条路，这些机器的速度就永久 0.0。
+  // 样本时刻统一用**浏览器到达时刻** Date.now()，避免远程端与宿主进程时钟不同源。
+  const srvStampRef = useRef(0);
+  const srvSamplesRef = useRef<Array<{ at: number; total: number }>>([]);
+  useEffect(() => {
+    if (usage === undefined) return;
+    const stamp = usage.realtimeUpdatedAt;
+    if (stamp <= 0 || stamp === srvStampRef.current) return;
+    srvStampRef.current = stamp;
+    const s = srvSamplesRef.current;
+    const last = s[s.length - 1];
+    // 与客户端采样同款守卫：归档回退 / 跨回合骤降、>5s 间隔视为停滞 → 重开窗口。
+    if (last !== undefined && (usage.realtimeOutputTokens < last.total || Date.now() - last.at > 5000)) s.length = 0;
+    if (s.length === 0 || s[s.length - 1].total !== usage.realtimeOutputTokens) s.push({ at: Date.now(), total: usage.realtimeOutputTokens });
+  }, [usage]);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -555,12 +576,19 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
     const id = setInterval(() => {
       const u = usageRef.current;
       if (u === undefined) return;
-      const samples = rateSamplesRef.current;
-      const live = tokenRateOf(samples, Date.now());
+      const now = Date.now();
+      const c = rateSamplesRef.current;
+      const s = srvSamplesRef.current;
+      // 两个源各自独立成窗（量纲不同：客户端是字符估算、宿主是真实 token，混进同一个
+      // 窗口会比出假尖峰）：优先客户端直播流，其次宿主实时投影。
+      const live = tokenRateOf(c, now) ?? tokenRateOf(s, now);
+      const newestAt = Math.max(c.length > 0 ? c[c.length - 1].at : 0, s.length > 0 ? s[s.length - 1].at : 0);
       // 停滞检测：最新样本已滑出窗口（>窗口+1.5s 没有新 token 样本）说明
       // 输出已停止/工具执行中——清零速度显示，而不是把旧值永远冻结在原地。
-      const newestAt = samples.length > 0 ? samples[samples.length - 1].at : 0;
-      if (live === null && Date.now() - newestAt > RATE_WINDOW_MS + 1500) {
+      // 判据里必须有「确实有过样本」：样本为空时 newestAt = 0，Date.now() - 0 恒大于
+      // 阈值 → 每 tick 都清零并 return，下面那句回合平均兜底永远执行不到（此前正是这个
+      // 洞：读不到 live partial 的机器速度恒显示 0.0，连兜底都被吃掉）。
+      if (live === null && newestAt > 0 && now - newestAt > RATE_WINDOW_MS + 1500) {
         setRate(null);
         return;
       }
@@ -1209,6 +1237,17 @@ function seedEntry(key: string, ov: Record<string, PriceOverrideEntry>, bals: Ba
   };
 }
 
+/** /api/usage-meter/refresh-official-prices 的应答（成功与失败同一形状）。 */
+type SyncPricesDoc = {
+  ok?: boolean;
+  error?: string;
+  pageModels?: string[];
+  updated?: Array<{ pageModel: string; model: string; input: number; output: number }>;
+  missing?: Array<{ pageModel: string }>;
+  retired?: string[];
+  warnings?: string[];
+};
+
 function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -1618,6 +1657,15 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
   // currency. Switch to baseCurrency → restore original (no conversion);
   // switch away → ×rate on every number. The batch `discount` is untouched
   // (it is a multiplier, not a money amount).
+  // 「同步失败」必须自解释：刚装/刚更新完插件但宿主进程还没重启时，浏览器已经拿到新的
+  // 客户端 bundle（按钮在），老进程里却没有这个接口 → 请求拿不到 JSON（实测：这条兜底
+  // catch 会把真实原因整个丢掉，用户只看到一句「同步失败」而不知所措）。所以失败提示
+  // 固定附带「先重启 dsh web」的指引 + 真实原因（HTTP 状态 / 服务端原文 / 异常文本）。
+  const syncFailMsg = (detail: string): string => {
+    const hint = L('同步失败：如果刚刚安装或更新过本插件，请先重启 dsh web 再试');
+    return detail === '' ? hint : `${hint}\n${L('原因：')}${detail}`;
+  };
+
   // 一键同步官方价格：服务端抓官网价格页、解析价格表 + 注释(3)峰谷窗口，
   // 写入本机官方模型的价格 override（refresh-official-prices 端点）。
   const onSyncOfficialPrices = async () => {
@@ -1632,9 +1680,20 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
     setSyncPricesOk(false);
     try {
       const res = await fetch('/api/usage-meter/refresh-official-prices', { method: 'POST' });
-      const doc = (await res.json()) as { ok?: boolean; error?: string; pageModels?: string[]; updated?: Array<{ pageModel: string; model: string; input: number; output: number }>; missing?: Array<{ pageModel: string }>; retired?: string[]; warnings?: string[] };
-      if (!res.ok || doc.ok === false) {
-        setSyncPricesMsg(doc.error ?? L('同步失败'));
+      // 先取正文再自行解析：拿不到 JSON（接口不存在 → 401/404，或网关回了 HTML）时必须
+      // 把 HTTP 状态和正文片段带出来，否则又只剩一句无信息量的「同步失败」。
+      const raw = await res.text();
+      let doc: SyncPricesDoc | null = null;
+      try {
+        doc = JSON.parse(raw) as SyncPricesDoc;
+      } catch {
+        doc = null;
+      }
+      if (doc === null) {
+        const snippet = raw.trim().slice(0, 120);
+        setSyncPricesMsg(syncFailMsg(`HTTP ${res.status}${snippet === '' ? '' : ` · ${snippet}`}`));
+      } else if (!res.ok || doc.ok === false) {
+        setSyncPricesMsg(syncFailMsg(doc.error ?? ''));
       } else {
         const n = doc.updated?.length ?? 0;
         // 官方模型四段全景（每段一行）：本机列表 → 官网定价 → 已更新 → 官网未定价。
@@ -1657,8 +1716,8 @@ function UsageMeterSettingsSection(_props: { close: () => void }): ReactElement 
         // 模型卡单价立即填入（此前只写盘不刷新前端状态，卡片要等整页刷新才拿到新价）。
         await reloadConfig();
       }
-    } catch {
-      setSyncPricesMsg(L('同步失败'));
+    } catch (err) {
+      setSyncPricesMsg(syncFailMsg(String(err)));
     }
     setSyncingPrices(false);
   };

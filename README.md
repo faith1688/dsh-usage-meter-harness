@@ -89,6 +89,14 @@ pnpm update @faith1688/dsh-usage-meter-harness
 
 (You may also pin an exact version, e.g. `...@1.0.28`.)
 
+> **Marketplace update failed?** If it reports *"targeted vX but installed vY; the
+> previous version was restored automatically"*, that is pnpm's **new-release
+> cooldown** (`minimumReleaseAge` — a freshly published version is skipped for
+> roughly 24h). Your install is not broken and nothing in your config or data was
+> touched. **Wait 24 hours** and click update again, or upgrade right away with the
+> `npx` command below (or add this package name, without a version, to
+> `minimumReleaseAgeExclude` in your profile's `pnpm-workspace.yaml`).
+
 **If your `package.json` binds the plugin via a `file:` path or a pin that `add`
 won't override** (you see `Already up to date` / `downloaded 0`), use the
 one-line installer instead — it always requests `@latest`, which rewrites the

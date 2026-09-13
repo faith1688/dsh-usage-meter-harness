@@ -241,5 +241,32 @@ const tok = (p, m) => { const b = bucket(p, m); return b === undefined ? null : 
   eq('8c', '会话总额换算到显示币种 CNY（1×7.2）', v.estimatedCost, 7.2, 1e-9);
 }
 
+// ── 9. 实时速度的「第二采样源」：宿主投影 realtimeOutputTokens/realtimeUpdatedAt ──
+// 有些机器读不到客户端 live partial（不同 DSH 运行时 / 远程端 / useChat 未注入），
+// client.tsx 的采样源② 是它们唯一能拿到实时速度的地方，而它依赖「每个流式文本 delta 都
+// 推进这两个字段」。此前这段被删掉，导致那些机器速度恒显示 0.0（用户实测远程端）。
+{
+  const t0 = Date.UTC(2026, 0, 11, 1, 0, 0);
+  const delta = (time, type, text) => ({ type: 'assistant/chunk', time, data: { turn: 1, step: 1, chunk: { type, text } } });
+  let st = proj.init();
+  st = proj.apply(st, { type: 'turn/start', time: t0, data: { turn: 1 } });
+  const v0 = proj.wire.view(st);
+  eq('9a', '起始实时 token = 0', v0.realtimeOutputTokens, 0);
+  eq('9b', '起始实时时间戳 = 0', v0.realtimeUpdatedAt, 0);
+
+  st = proj.apply(st, delta(t0 + 500, 'text-delta', '你好'));
+  const v1 = proj.wire.view(st);
+  eq('9c', '首个 text-delta 后实时 token 增长', v1.realtimeOutputTokens > 0, true);
+  eq('9d', '实时时间戳推进到该事件时刻（客户端靠它检测"有新样本"）', v1.realtimeUpdatedAt, t0 + 500);
+
+  st = proj.apply(st, delta(t0 + 1000, 'text-delta', '世界'));
+  const v2 = proj.wire.view(st);
+  eq('9e', '第二个 delta 继续累加（客户端据此凑够 ≥2 个样本算速率）', v2.realtimeOutputTokens > v1.realtimeOutputTokens, true);
+  eq('9f', '每个 delta 都推进时间戳', v2.realtimeUpdatedAt, t0 + 1000);
+
+  st = proj.apply(st, delta(t0 + 1500, 'reasoning-delta', '想'));
+  eq('9g', 'reasoning-delta 同样计入（思考阶段也要有速度）', proj.wire.view(st).realtimeOutputTokens > v2.realtimeOutputTokens, true);
+}
+
 console.log(failures === 0 ? '\ntest-usage-accounting: ALL PASSED' : `\ntest-usage-accounting: ${failures} FAILED`);fs.rmSync(home, { recursive: true, force: true });
 process.exit(failures === 0 ? 0 : 1);
