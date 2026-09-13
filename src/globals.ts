@@ -273,3 +273,33 @@ export function estTokens(text: string): number {
   }
   return Math.ceil(cjk + other / 4);
 }
+
+// ── 实时输出速率（纯函数：客户端胶囊 + 回归脚本共用，便于直接验证） ──────────
+export type RateSample = { at: number; total: number };
+
+/** 速率窗口：只统计最近这段时间内的样本。 */
+export const RATE_WINDOW_MS = 3000;
+
+/** 单源速率：窗口内「末样本 − 首样本」的 token 增量 ÷ 用时。
+ *  **会就地淘汰窗口外样本**（调用方把同一个数组当滑动窗口用）。
+ *  样本不足 2 条、用时过短（<0.3s）或增量非正（换回合/回退）→ null。 */
+export function tokenRateOf(samples: RateSample[], now: number): number | null {
+  while (samples.length > 0 && now - samples[0].at > RATE_WINDOW_MS) samples.shift();
+  if (samples.length < 2) return null;
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const elapsed = (last.at - first.at) / 1000;
+  const tokens = last.total - first.total;
+  return elapsed >= 0.3 && tokens > 0 ? tokens / elapsed : null;
+}
+
+/** 实时输出速率：① 客户端直播流优先，② 宿主投影兜底；两源都没有实时数据 → null，
+ *  含义就是「此刻没有在输出」，界面据此显示 0。
+ *
+ *  **绝不回退到"上一次的数值"**：窗口外的样本会被淘汰清空，任何"没有新数据就沿用旧值"
+ *  的写法都会让数字停住不动。用户实测过两次：一次是流式结束后数字永远停在最后那个值
+ *  （跑本地工具时也不归零），一次是干脆恒显示 0.0。正确语义只有两种——
+ *  有实时数据就显示真实速率，没有就显示 0。 */
+export function liveOutputRate(client: RateSample[], server: RateSample[], now: number): number | null {
+  return tokenRateOf(client, now) ?? tokenRateOf(server, now);
+}

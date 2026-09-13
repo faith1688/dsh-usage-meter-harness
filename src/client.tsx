@@ -46,7 +46,7 @@ import type { BillingRow, ModelPricing, UsageCostValue } from './projection.ts';
 import { tt, L, setShellLocaleProvider, setManualLang } from './i18n.ts';
 import { matchTypeId } from './billing.ts';
 import { THEMES, themeOf, resolveTheme, getThemeState, setThemeState, DEFAULT_CUSTOM, THEME_CHANGE, withAlpha, type Theme, type ThemeCustom, type ThemeState } from './theme.ts';
-import { getGlobalColors, setGlobalColors, GLOBAL_COLORS_CHANGE, DEFAULT_GLOBAL_COLORS, tierGradient, lightenHex, normalizeHex, getFontMode, setFontMode, fontStackOf, getFontCustom, setFontCustom, fontStackForCategory, fontWeightForCategory, FONT_WEIGHT_OPTIONS, FONT_CUSTOM_DEFAULT, COMMON_SYSTEM_FONTS, isFontAvailable, FONT_MODE_CHANGE, estTokens, type GlobalColors, type FontMode, type FontCustom } from './globals.ts';
+import { getGlobalColors, setGlobalColors, GLOBAL_COLORS_CHANGE, DEFAULT_GLOBAL_COLORS, tierGradient, lightenHex, normalizeHex, getFontMode, setFontMode, fontStackOf, getFontCustom, setFontCustom, fontStackForCategory, fontWeightForCategory, FONT_WEIGHT_OPTIONS, FONT_CUSTOM_DEFAULT, COMMON_SYSTEM_FONTS, isFontAvailable, FONT_MODE_CHANGE, estTokens, liveOutputRate, type RateSample, type GlobalColors, type FontMode, type FontCustom } from './globals.ts';
 
 /** Services this client plugin requires on `ctx`. */
 export const inject = ['slots', 'locale'];
@@ -247,27 +247,8 @@ const dateSep: CSSProperties = {
 };
 
 // ── live token-rate sampling ─────────────────────────────────────────────────
+// 窗口/取速率算法已移到 globals.ts（纯函数 liveOutputRate/tokenRateOf），便于回归脚本直测。
 const RATE_TICK_MS = 500;
-const RATE_WINDOW_MS = 3000;
-
-function tokenRateOf(samples: Array<{ at: number; total: number }>, now: number): number | null {
-  while (samples.length > 0 && now - samples[0].at > RATE_WINDOW_MS) samples.shift();
-  if (samples.length < 2) return null;
-  const first = samples[0];
-  const last = samples[samples.length - 1];
-  const elapsed = (last.at - first.at) / 1000;
-  const tokens = last.total - first.total;
-  return elapsed >= 0.3 && tokens > 0 ? tokens / elapsed : null;
-}
-
-function completedTurnRate(turns: UsageCostValue['turns']): number | null {
-  for (let i = turns.length - 1; i >= 0; i--) {
-    const turn = turns[i];
-    const durationMs = turn.endedAt - turn.startedAt;
-    if (turn.endedAt > 0 && turn.outputTokens > 0 && durationMs >= 300) return turn.outputTokens / (durationMs / 1000);
-  }
-  return null;
-}
 
 // ── formatting ───────────────────────────────────────────────────────────────
 function formatTokens(n: number): string {
@@ -441,7 +422,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [rate, setRate] = useState<number | null>(null);
-  const rateSamplesRef = useRef<Array<{ at: number; total: number }>>([]);
+  const rateSamplesRef = useRef<RateSample[]>([]);
   const usageRef = useRef<UsageCostValue | undefined>(undefined);
   // 用量展板（阶段D）：弹窗右上角小图标打开；三种视图来自 /api/usage-meter/stats。
   const [showDash, setShowDash] = useState<boolean>(() => { try { return localStorage.getItem('um-dash-open') !== '0'; } catch { return true; } });
@@ -550,7 +531,7 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
   // 能给出真实时速度。此前这段被删掉、只剩直播流一条路，这些机器的速度就永久 0.0。
   // 样本时刻统一用**浏览器到达时刻** Date.now()，避免远程端与宿主进程时钟不同源。
   const srvStampRef = useRef(0);
-  const srvSamplesRef = useRef<Array<{ at: number; total: number }>>([]);
+  const srvSamplesRef = useRef<RateSample[]>([]);
   useEffect(() => {
     if (usage === undefined) return;
     const stamp = usage.realtimeUpdatedAt;
@@ -576,23 +557,12 @@ useEffect(() => { const h = () => setLangTick((v) => v + 1); window.addEventList
     const id = setInterval(() => {
       const u = usageRef.current;
       if (u === undefined) return;
-      const now = Date.now();
-      const c = rateSamplesRef.current;
-      const s = srvSamplesRef.current;
-      // 两个源各自独立成窗（量纲不同：客户端是字符估算、宿主是真实 token，混进同一个
-      // 窗口会比出假尖峰）：优先客户端直播流，其次宿主实时投影。
-      const live = tokenRateOf(c, now) ?? tokenRateOf(s, now);
-      const newestAt = Math.max(c.length > 0 ? c[c.length - 1].at : 0, s.length > 0 ? s[s.length - 1].at : 0);
-      // 停滞检测：最新样本已滑出窗口（>窗口+1.5s 没有新 token 样本）说明
-      // 输出已停止/工具执行中——清零速度显示，而不是把旧值永远冻结在原地。
-      // 判据里必须有「确实有过样本」：样本为空时 newestAt = 0，Date.now() - 0 恒大于
-      // 阈值 → 每 tick 都清零并 return，下面那句回合平均兜底永远执行不到（此前正是这个
-      // 洞：读不到 live partial 的机器速度恒显示 0.0，连兜底都被吃掉）。
-      if (live === null && newestAt > 0 && now - newestAt > RATE_WINDOW_MS + 1500) {
-        setRate(null);
-        return;
-      }
-      setRate((previous) => live ?? previous ?? completedTurnRate(u.turns));
+      // 实时速率 = 客户端直播流优先、宿主投影兜底（两源各自独立成窗：字符估算与真实 token
+      // 量纲不同，混进一个窗口会算出假尖峰）；两个源都没有实时数据 → null → 界面显示 0。
+      // **绝不保留上一次的数值**：流式结束后样本会被窗口淘汰清空，任何"没有新数据就沿用
+      // 旧值"的写法都会让速度停在最后一个值上不动（用户实测：API 返回完、开始跑本地工具
+      // 时数字不归零；此前还有一个版本因为空数组判定把兜底挡死，恒显示 0.0）。
+      setRate(liveOutputRate(rateSamplesRef.current, srvSamplesRef.current, Date.now()));
     }, RATE_TICK_MS);
     return () => clearInterval(id);
   }, []);
