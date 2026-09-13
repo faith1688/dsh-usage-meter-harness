@@ -78,6 +78,25 @@ type DockProps = PropsRuntime<'conversation.composer.dock'> & { useChat?: UseCha
 const NOOP_USE_PROJECTION = <T,>(_key: string): T | undefined => undefined;
 type UseProjectionLike = (key: string) => UsageCostValue | undefined;
 
+/**
+ * Read an OPTIONAL service, i.e. one this plugin deliberately does not declare
+ * in `inject`.
+ *
+ * A bare `ctx.locale` read is NOT a probe. The context is a proxy that throws
+ * `cannot get property "locale" without inject` at runtime; a TypeScript `as`
+ * cast hides that from the compiler but not from the host — shipping that cost
+ * v2.0.38 a broken plugin on every machine (`Failed to load plugins`). So:
+ * prefer the reflection helper `ctx.get(name)`, and keep a guarded property
+ * read as the fallback for contexts that do not expose it.
+ */
+function readOptionalService(ctx: ClientContext, name: string): unknown {
+  const c = ctx as unknown as { get?: (n: string) => unknown } & Record<string, unknown>;
+  if (typeof c.get === 'function') {
+    try { return c.get(name); } catch { /* fall through to the guarded read */ }
+  }
+  try { return c[name]; } catch { return undefined; }
+}
+
 export function apply(ctx: ClientContext): void {
   // Wrap in slots.inject so registration waits for the dock seat's declaration
   // regardless of plugin load order.
@@ -96,10 +115,11 @@ export function apply(ctx: ClientContext): void {
       UsageMeterSettingsSection,
     ),
   );
-  // Follow the shell locale: read the dsh-client-locale service (ctx.locale)
-  // and re-render dock readout + settings page on 'locale/change'. Structural
-  // type on purpose — this plugin has no dependency on dsh-client-locale.
-  const shellLocaleService = (ctx as unknown as { locale?: { getLocale(): { active: string } } }).locale;
+  // Follow the shell locale: read the dsh-client-locale service — WITHOUT
+  // declaring it in `inject` (cordis has no optional inject: declaring it would
+  // park `apply` forever on any composition that has no locale service). The
+  // read must go through the probe: `ctx.locale` itself would throw.
+  const shellLocaleService = readOptionalService(ctx, 'locale') as { getLocale(): { active: string } } | undefined;
   if (shellLocaleService) {
     setShellLocaleProvider(() => (shellLocaleService.getLocale().active === 'en' ? 'en' : 'zh'));
     (ctx as unknown as { on(name: string, fn: () => void): void }).on('locale/change', () => {
