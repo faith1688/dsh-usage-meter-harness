@@ -18,7 +18,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/client.tsx
+// src/client.tsx
 var client_exports = {};
 __export(client_exports, {
   UsageReadout: () => UsageReadout,
@@ -28,7 +28,7 @@ __export(client_exports, {
 module.exports = __toCommonJS(client_exports);
 var import_react = require("react");
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/i18n.ts
+// src/i18n.ts
 var shellLocale = null;
 var manualLang = null;
 function setShellLocaleProvider(p) {
@@ -682,7 +682,7 @@ function L(zhText) {
   return getLang() === "en" ? EN_BY_ZH[zhText] ?? zhText : zhText;
 }
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/billing.ts
+// src/billing.ts
 function matchTypeId(p) {
   if (p === null) return "basic";
   if (p.discount !== void 0 && p.discount < 1) return "batch";
@@ -693,7 +693,7 @@ function matchTypeId(p) {
   return "basic";
 }
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/theme.ts
+// src/theme.ts
 var DEFAULT_CUSTOM = {
   pillFlat: "",
   pillPeak: "",
@@ -1289,7 +1289,7 @@ function setThemeState(state) {
 }
 var THEME_CHANGE = THEME_CHANGE_EVENT;
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/globals.ts
+// src/globals.ts
 var DEFAULT_GLOBAL_COLORS = {
   alertOk: "#16a34a",
   alertNear: "#f59e0b",
@@ -1505,7 +1505,7 @@ function liveOutputRate(client, server, now) {
   return tokenRateOf(client, now) ?? tokenRateOf(server, now);
 }
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/relevance.ts
+// src/relevance.ts
 function squash(s) {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -1602,7 +1602,7 @@ function rankByRelevance(target, items, nameOf) {
   return items.map((item) => ({ item, score: relevanceScore(target, nameOf(item)) })).sort((x, y) => y.score - x.score || nameOf(x.item).localeCompare(nameOf(y.item)));
 }
 
-// Z:/deepseek/dsh-usage-meter-desktop/src/client.tsx
+// src/client.tsx
 var import_jsx_runtime = require("react/jsx-runtime");
 var inject = ["slots"];
 var NOOP_USE_CHAT = (sel) => sel({});
