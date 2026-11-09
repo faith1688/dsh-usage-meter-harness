@@ -8,6 +8,31 @@ the official DeepSeek models **and** any custom model registered in DSH.
 
 ![settings](assets/screenshot.png)
 
+## Two builds in this repo
+
+**Both the web build and the desktop build are usable — pick by which DSH you run.**
+
+| | Web build (repo root) | Desktop build (`desktop/`) |
+| --- | --- | --- |
+| npm package | `@faith1688/dsh-usage-meter-harness` | `dsh-usage-meter-desktop` |
+| Version line | 2.0.x | **3.0.0** |
+| Host | DSH 0.1 / `dsh web` profile | **DSH 0.2 desktop** (also runs under `dsh web`) |
+| Plugin id | `usage-meter` | `usage-meter-desktop` |
+| Data directory | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
+| Config file | `usage-meter.json` | `usage-meter-desktop.json` |
+
+- **On DSH 0.2 (the desktop app) use the 3.0.0 desktop build.** 2.0.x calls
+  `ctx.settings.register`, which DSH 0.2 removed — the plugin shows
+  `1 entry did not activate` and nothing renders.
+- **On DSH 0.1 / web profile use the 2.0.x web build.** It is the long-stable line.
+- Plugin ids, data directories and config filenames are deliberately different, so
+  installing both side by side never clobbers the other's config or ledger.
+- Full 3.0.0 changelog, install steps and screenshots: [`desktop/README.md`](desktop/README.md)
+  ([简体中文](desktop/README.zh-CN.md)).
+
+The rest of **this** README describes the web build (2.0.x). Everything below applies
+to the root package only.
+
 ## Install
 
 > Prerequisite (methods 1 & 2): the DSH CLI itself runs on pnpm — install it once per machine:
