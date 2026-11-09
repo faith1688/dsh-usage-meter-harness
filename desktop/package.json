@@ -1,7 +1,7 @@
 {
   "name": "dsh-usage-meter-desktop",
   "description": "用量计量插件的桌面端（DSH 0.2+）独立构建：在聊天输入框旁直接看到 tokens、花费与真实余额。与网页端 @faith1688/dsh-usage-meter-harness 互不影响。",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

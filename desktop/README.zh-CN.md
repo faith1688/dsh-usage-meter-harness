@@ -8,18 +8,36 @@ DeepSeek Harness（DSH）的**实时用量 / 费用 / 余额计量插件**。
 
 ![设置页截图](assets/screenshot.png)
 
-## 3.0.0 —— 桌面版，和之前的 2.0.x 到底差在哪
+## 3.1.0 —— 一个包，两代宿主都能装
 
-一句话：**2.0.x 是网页版（web profile）构建，3.0.0 是桌面版（DSH 0.2 desktop）构建**。
-两者是**两个独立的插件**，可以同时装、互不干扰。
+一句话：**同一个包，装到 DSH 0.1（web profile）和 DSH 0.2（桌面版）都能跑**——不用挑版本，不用按宿主打补丁。
 
-| | 2.0.x（网页版） | 3.0.0（桌面版，本仓库当前版本） |
+3.1.0 之前，两个构建各自硬依赖一个"另一代没有"的服务：
+
+| `inject` | 2.0.x | 3.0.0 | 3.1.0 |
+| --- | --- | --- | --- |
+| 声明 | `['settings','sessionProjections']` | `['sessionProjections','webServer']` | `['sessionProjections']` |
+| DSH 0.1（网页版） | ✅ | ⚠️ 能跑，但只靠探测 | ✅ |
+| DSH 0.2（桌面版） | ❌ 没有 `ctx.settings.register` | ✅ | ✅ |
+
+同一个包怎么覆盖两代：
+
+- **只把 `sessionProjections` 声明为必需**。两代都提供它，读数通道就架在它上面。
+- **`webServer` 变成可选，用子 fiber 解析**。`ctx.inject(['webServer'], …)` 在服务出现时激活，组合里永远不提供就一直 pending，不影响主 `apply`。在此之前注册的路由先入队、服务到位后按序 flush——所以既能装在"未 inject 也能读服务"的 0.1 上，也能装在"必须声明依赖"的 0.2 上。完全没有 `webServer` 的组合就退化成"没有 HTTP 路由，读数照常"。
+- **不碰宿主 settings 服务**。`src/settings-scope.ts` 自己在插件数据目录里管一个 JSON 文件，所以 0.1 的 `ctx.settings.register` 和 0.2 的 `SettingsForms` 都跟它无关。设置界面走 `settings.section` 客户端 slot，两代都声明了这个 slot。
+- **客户端半与代际无关**。`inject = ['slots']`，`dsh.client.inject` 指向 `dsh-client-ui-conversation` + `dsh-client-locale`（两代 id 完全一致），`useProjection` / `useChat` 都带兜底探测。
+
+本机实测：DSH 0.1.5-rc.1 上插件正常挂载，`/api/usage-meter/*` 每个路由都返回 200，`__DSH_BOOT__` 的 application 批次里明确列着 `dsh-usage-meter-desktop/client.js`（bundle 实际下发 321 076 字节）。DSH 0.2 上同一个包照旧提供桌面界面。`scripts/test-host-matrix.mjs` 用真实 cordis 复现三种宿主形态——服务已就位、服务迟到、服务永不提供——三种都必须通过。
+
+下面 3.0.0 的清单仍然有效，它写的是相对 2.0.39 改了什么。
+
+| | 2.0.x（网页版构建） | 3.x（本构建） |
 | --- | --- | --- |
 | npm 包名 | `@faith1688/dsh-usage-meter-harness` | `dsh-usage-meter-desktop` |
 | 插件 id | `usage-meter` | `usage-meter-desktop` |
 | 数据目录 | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
 | 配置文件名 | `usage-meter.json` | `usage-meter-desktop.json` |
-| 适用宿主 | DSH 0.1 / web profile | **DSH 0.2 桌面版**（也兼容 web） |
+| 适用宿主 | DSH 0.1 / web profile | **DSH 0.1 网页版 + DSH 0.2 桌面版** |
 
 数据目录和文件名**刻意分开**：两个版本同时装着时不会互相覆盖配置和账本。
 

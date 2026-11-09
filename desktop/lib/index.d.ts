@@ -84,15 +84,23 @@ export declare const name = "usage-meter-desktop";
 /**
  * Required services.
  *
- * `sessionProjections` carries the readout. `webServer` is REQUIRED here rather
- * than probed: DSH 0.2 stopped resolving an un-injected service, so 0.1's
- * `ctx.get('webServer')` probe reads as absent, every `/api/usage-meter/*` route
- * silently disappears, and the client half is left with no data channel. Every
- * working 0.2 plugin declares it the same way.
+ * Only `sessionProjections` is required: it is the readout channel and BOTH DSH
+ * generations provide it (0.1's web build and 0.2's desktop build). Everything
+ * else is optional and resolved at runtime:
  *
- * `llm` stays probed: only the optional price-scraping and provider-listing
- * endpoints need it, and a hard requirement would park this plugin in PENDING
- * in any composition that never provides it.
+ * - `webServer` — both generations provide it, but they disagree on when an
+ *   un-injected service is readable (0.1 resolves it through `ctx.get()`, 0.2
+ *   only exposes it to a fiber that declared the dependency). A child fiber via
+ *   `ctx.inject(['webServer'], …)` inside `apply` covers both, and a composition
+ *   without it simply runs without HTTP routes instead of parking the plugin.
+ * - `settings` — not used at all. The plugin owns its file-backed scope
+ *   (`settings-scope.ts`), so 0.1's `ctx.settings.register` and 0.2's
+ *   `SettingsForms` are both irrelevant here.
+ * - `llm` — only the optional price-scraping and provider-listing endpoints need
+ *   it, and it is read at call time.
+ *
+ * The point of this list is version independence: nothing in it is a service
+ * that one generation has and the other lacks.
  */
 export declare const inject: string[];
 /** 用量看板聚合：按 (底层 provider, model) 累计真实 token/费用（只读会话事件，不碰计费/余额）。 */

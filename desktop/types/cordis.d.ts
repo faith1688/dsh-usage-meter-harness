@@ -26,6 +26,16 @@ export interface Context {
   webServer: {
     register(opts: { kind: string; path: string; handler: (req: any, res: any) => unknown }): void;
   };
+  /**
+   * Spawn a child fiber that activates once every listed service is available.
+   *
+   * This is cordis's "optional dependency" escape hatch: a service the
+   * composition never provides leaves the child pending, and the parent fiber is
+   * untouched. Available on cordis 4.0.x, which covers both DSH 0.1 and 0.2.
+   */
+  inject(deps: string[], callback: (ctx: Context) => unknown): unknown;
+  /** Read a service without declaring the inject requirement. */
+  get(name: string, strict?: boolean): unknown;
   effect(fn: () => unknown): unknown;
   on(
     event: string,

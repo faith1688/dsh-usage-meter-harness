@@ -96,17 +96,25 @@ export const name = 'usage-meter-desktop';
 /**
  * Required services.
  *
- * `sessionProjections` carries the readout. `webServer` is REQUIRED here rather
- * than probed: DSH 0.2 stopped resolving an un-injected service, so 0.1's
- * `ctx.get('webServer')` probe reads as absent, every `/api/usage-meter/*` route
- * silently disappears, and the client half is left with no data channel. Every
- * working 0.2 plugin declares it the same way.
+ * Only `sessionProjections` is required: it is the readout channel and BOTH DSH
+ * generations provide it (0.1's web build and 0.2's desktop build). Everything
+ * else is optional and resolved at runtime:
  *
- * `llm` stays probed: only the optional price-scraping and provider-listing
- * endpoints need it, and a hard requirement would park this plugin in PENDING
- * in any composition that never provides it.
+ * - `webServer` — both generations provide it, but they disagree on when an
+ *   un-injected service is readable (0.1 resolves it through `ctx.get()`, 0.2
+ *   only exposes it to a fiber that declared the dependency). A child fiber via
+ *   `ctx.inject(['webServer'], …)` inside `apply` covers both, and a composition
+ *   without it simply runs without HTTP routes instead of parking the plugin.
+ * - `settings` — not used at all. The plugin owns its file-backed scope
+ *   (`settings-scope.ts`), so 0.1's `ctx.settings.register` and 0.2's
+ *   `SettingsForms` are both irrelevant here.
+ * - `llm` — only the optional price-scraping and provider-listing endpoints need
+ *   it, and it is read at call time.
+ *
+ * The point of this list is version independence: nothing in it is a service
+ * that one generation has and the other lacks.
  */
-export const inject = ['sessionProjections', 'webServer'];
+export const inject = ['sessionProjections'];
 
 // Ambient runtime facts the (pure, module-level) projection `view` reads. The
 // cfg-owned fields (priceSourceUrl / refreshIntervalMs / deepseekApiKey) are
@@ -1804,13 +1812,50 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     }
     try { return c[name]; } catch { return undefined; }
   };
-  // Injected by the loader (see `inject` above). The `ctx.get` probe stays as a
-  // fallback for loaders that resolve services without injection.
-  const httpServer = ((ctx as unknown as { webServer?: { register(route: unknown): unknown } }).webServer
-    ?? readService('webServer')) as { register(route: unknown): unknown } | undefined;
-  if (httpServer === undefined) {
-    console.warn('[usage-meter] webServer service is absent in this composition — HTTP routes disabled (readout and accounting still active).');
+  // Route registration goes through this sink so the SAME build mounts on both
+  // DSH generations. Both provide `webServer`; they disagree only on WHEN an
+  // un-injected service is readable (0.1 resolves it through `ctx.get()`, 0.2
+  // exposes it only to a fiber that declared the dependency). A child fiber via
+  // `ctx.inject` is cordis's supported way to express "optional": it activates
+  // when the service appears and stays pending forever when the composition
+  // never provides it — the parent `apply` runs either way. Routes registered
+  // before that point are queued and flushed in order.
+  type RouteSink = { register(route: unknown): unknown };
+  const pendingRoutes: unknown[] = [];
+  let routeSink: RouteSink | null = null;
+  const registerRoute = (route: unknown): void => {
+    if (routeSink !== null) routeSink.register(route);
+    else pendingRoutes.push(route);
+  };
+  const adoptServer = (server: unknown): void => {
+    if (server === null || server === undefined || typeof (server as RouteSink).register !== 'function') {
+      console.warn('[usage-meter] webServer service is absent in this composition — HTTP routes disabled (readout and accounting still active).');
+      return;
+    }
+    // Idempotent: the child fiber and the direct probe can both see the same
+    // service (0.1 resolves it through `get`, 0.2 through the fiber), and
+    // adopting twice would double-flush into the same server.
+    if (routeSink === server) return;
+    routeSink = server as RouteSink;
+    for (const route of pendingRoutes.splice(0)) routeSink.register(route);
+    console.log('[usage-meter] HTTP routes registered (config/price/stats/models endpoints active).');
+  };
+  try {
+    // A child fiber, and the callback runs synchronously when the service is
+    // already active — so on a warm host the sink is set before any route is
+    // queued, and on a cold one the queue is flushed as soon as it appears.
+    ctx.inject(['webServer'], (child) => {
+      adoptServer((child as unknown as { webServer?: unknown }).webServer);
+    });
+  } catch (err) {
+    console.warn('[usage-meter] ctx.inject(webServer) unavailable on this host:', err);
   }
+  // Fallback for hosts whose loader resolves services without injection (the
+  // 0.1 path). Silent on failure: a composition without `webServer` is a
+  // supported shape, not an error — the child fiber stays pending and the
+  // readout keeps working without HTTP routes.
+  const probedServer = readService('webServer');
+  if (routeSink === null && probedServer !== undefined) adoptServer(probedServer);
 
   // 包装标记先于持久化数据解析：老数据里包装路由的定价/余额/Key/统计键要在
   // 读取时就归一回底层，否则历史配置变孤儿（组合入口的 config 只作为兜底，
@@ -1969,7 +2014,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   ctx.sessionProjections.register(usageCostProjection);
 
   // Billing-method templates for the popup dropdown.
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/templates',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1979,7 +2024,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // Force a fresh USD→CNY rate on demand (popup currency switch).
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/active',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -1987,7 +2032,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
       res.end(JSON.stringify({ active: activeModel }));
     },
   });
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/refresh-rate',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -2000,7 +2045,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // 一键同步官方价格：抓官网价格页 → 解析价格表（rowspan 网格）+ 注释(3)峰谷窗口，
   // 写入本机官方模型的价格 override。绝不编造数字：解析不出的模型跳过并告警，
   // 窗口解析失败则保留本机现有窗口；页面结构变化时原样返回 warnings。
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/refresh-official-prices',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -2112,7 +2157,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
 
   // 扫描本机其它计费插件已保存的定价（只读），供设置页「从其它插件获取定价」。
   // 不猜、不补：读不出价格的行直接不返回；行里带的币种原样回传，由前端决定换算。
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/peer-prices',
     handler: async (_req: unknown, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s: string) => void }) => {
@@ -2132,7 +2177,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // 为什么需要它：投影只为 session 事件重算 view，改价不产生事件，所以
   // `usage.pricing / usage.priceRows / usage.basePricing` 会一直是旧值，
   // 界面看起来像"点了没生效"。前端改价成功后直接打这个端点拿真值覆盖显示。
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/pricing',
     handler: async (req: { url?: string }, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2166,7 +2211,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   // 把某一条外部定价取到本插件（写成本模型的 price override）。
   // 峰谷窗口/生效星期不跟着搬：外部插件的窗口是「小时」语义，与本插件的分钟语义
   // 不同，硬搬会把高峰时段整体错位 —— 单价照取，窗口沿用本机现有的。
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/apply-peer-price',
     handler: async (req: { method?: string; [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2286,7 +2331,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // Config channel: a small HTTP endpoint so the browser popup can save config.
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/config',
     handler: async (req: { method?: string; [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2492,7 +2537,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
   });
 
   // ── 计费配置目录：导出/列出/从目录导入/删除（同一持久目录，浏览器 ↔ 宿主）──
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/export-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2548,7 +2593,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/delete-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2572,7 +2617,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/list-configs',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2597,7 +2642,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/import-config',
     handler: async (req: { [Symbol.asyncIterator](): AsyncIterator<string> }, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2636,7 +2681,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
 
   // Model-directory channel: expose provider → models (from the DSH LLM runtime)
   // so the settings "供应商定价管理" block can build its provider/model UI.
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/stats',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2647,7 +2692,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  httpServer?.register({
+  registerRoute({
     kind: 'exact',
     path: '/api/usage-meter/models',
     handler: async (_req: unknown, res: { writeHead: (s: number, h?: Record<string, string>) => void; end: (s?: string) => void }) => {
@@ -2695,12 +2740,8 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): void 
     },
   });
 
-  // Honest report: claim the routes only when the service was actually there.
-  // The degraded case already warned at the top of `apply` — printing
-  // "registered" unconditionally is how a skipped registration reads as success.
-  if (httpServer !== undefined) {
-    console.log('[usage-meter] HTTP routes registered (config/price/stats/models endpoints active).');
-  }
+  // Honest report lives in `adoptServer` — it prints only when the service was
+  // actually adopted, so a skipped registration can never read as success.
   currentPrices.updatedAt = Date.now();
   ctx.effect(() => {
     // v2.0.16: 下限保护（schema 不动，避免拒载已保存的旧配置）：

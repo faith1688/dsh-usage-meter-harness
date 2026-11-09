@@ -10,23 +10,21 @@ DeepSeek Harness（DSH）的**实时用量 / 费用 / 余额计量插件**。
 
 ## 本仓库有两个构建
 
-**网页端和桌面端都能用，看你在跑哪个 DSH。**
+**两个都能用。从 3.1.0 起，桌面端构建就是在任何一代 DSH 上都该装的那一个——一个包，两代宿主通吃。**
 
 | | 网页端（仓库根目录） | 桌面端（`desktop/`） |
 | --- | --- | --- |
 | npm 包名 | `@faith1688/dsh-usage-meter-harness` | `dsh-usage-meter-desktop` |
-| 版本线 | 2.0.x | **3.0.0** |
-| 宿主 | DSH 0.1 / `dsh web` 的 profile | **DSH 0.2 桌面版**（在 `dsh web` 下也能跑） |
+| 版本线 | 2.0.x | **3.1.x** |
+| 宿主 | DSH 0.1 / `dsh web` 的 profile | **DSH 0.1 网页 profile *和* DSH 0.2 桌面版** |
 | 插件 id | `usage-meter` | `usage-meter-desktop` |
 | 数据目录 | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
 | 配置文件 | `usage-meter.json` | `usage-meter-desktop.json` |
 
-- **在 DSH 0.2（桌面版）上装 3.0.0 桌面端构建。** 2.0.x 调的是
-  `ctx.settings.register`，DSH 0.2 已经删掉这个 API —— 插件会报
-  `1 entry did not activate`，界面上什么都不出来。
-- **在 DSH 0.1 / 网页 profile 上装 2.0.x 网页端构建。** 这是长期稳定那条线。
+- **3.1.0+ 两代宿主都能跑。** 必需依赖只留 `sessionProjections`，`webServer` 走可选的子 fiber 解析，设置文件自己管 —— 所以 0.1 有 `ctx.settings.register`、0.2 删了它，都跟它没关系。
+- **2.0.x 仍在调 `ctx.settings.register`**，DSH 0.2 已经删掉这个 API —— 装在桌面版上会报 `1 entry did not activate`，界面上什么都不出来。
 - 插件 id、数据目录、配置文件名三处都刻意错开，两个一起装也不会互相覆盖配置和账本。
-- 3.0.0 的完整改动清单、安装步骤、截图：见 [`desktop/README.zh-CN.md`](desktop/README.zh-CN.md)
+- 3.1.0 的完整改动清单、安装步骤、截图：见 [`desktop/README.zh-CN.md`](desktop/README.zh-CN.md)
   （[English](desktop/README.md)）。
 
 **本文下面**描述的是网页端构建（2.0.x），只对根目录这个包有效。

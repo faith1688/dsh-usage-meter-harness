@@ -8,18 +8,55 @@ the official DeepSeek models **and** any custom model registered in DSH.
 
 ![settings](assets/screenshot.png)
 
-## 3.0.0 — desktop build: how it differs from 2.0.x
+## 3.1.0 — one build, both DSH generations
 
-In one line: **2.0.x is the web-profile build, 3.0.0 is the DSH 0.2 desktop build.**
-They are two independent plugins and can be installed side by side.
+In one line: **the same package installs and runs on DSH 0.1 (web profile) and DSH 0.2
+(desktop) — nothing to choose, no per-host patch.**
 
-| | 2.0.x (web build) | 3.0.0 (desktop build — this version) |
+Before 3.1.0 each build hard-required a service the other generation lacked:
+
+| `inject` | 2.0.x | 3.0.0 | 3.1.0 |
+| --- | --- | --- | --- |
+| declared | `['settings','sessionProjections']` | `['sessionProjections','webServer']` | `['sessionProjections']` |
+| DSH 0.1 (web) | ✅ | ⚠️ works, but only through a probe | ✅ |
+| DSH 0.2 (desktop) | ❌ `ctx.settings.register` is gone | ✅ | ✅ |
+
+How one build covers both:
+
+- **`sessionProjections` is the only required service.** Both generations provide it;
+  it carries the readout.
+- **`webServer` is optional, resolved through a child fiber.** `ctx.inject(['webServer'], …)`
+  activates when the service appears and stays pending when a composition never
+  provides it. Routes registered before that point are queued and flushed in order, so
+  the plugin mounts on a host that resolves un-injected services (0.1) *and* on one
+  that does not (0.2). A composition with no `webServer` at all runs without HTTP
+  routes and keeps the readout.
+- **The host settings service is not used.** `src/settings-scope.ts` owns a JSON file
+  in the plugin's data directory, so 0.1's `ctx.settings.register` and 0.2's
+  `SettingsForms` are equally irrelevant. The settings UI rides the `settings.section`
+  client slot, which both generations declare.
+- **The client half is generation-agnostic.** `inject = ['slots']`, `dsh.client.inject`
+  names `dsh-client-ui-conversation` + `dsh-client-locale` (identical in both hosts),
+  and `useProjection` / `useChat` are probed with fallbacks.
+
+Verified on this machine: on DSH 0.1.5-rc.1 the plugin mounts, every
+`/api/usage-meter/*` route answers 200, and `__DSH_BOOT__` lists
+`dsh-usage-meter-desktop/client.js` in the application batch (bundle served,
+321 076 bytes). On DSH 0.2 the same package serves the desktop UI as before.
+`scripts/test-host-matrix.mjs` reproduces the three host shapes against real cordis —
+service already present, service arriving late, service never provided — and every
+case must pass.
+
+The 3.0.0 notes below still describe what changed against 2.0.39; they apply to this
+build too.
+
+| | 2.0.x (web build) | 3.x (this build) |
 | --- | --- | --- |
 | npm package | `@faith1688/dsh-usage-meter-harness` | `dsh-usage-meter-desktop` |
 | Plugin id | `usage-meter` | `usage-meter-desktop` |
 | Data directory | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
 | Config file | `usage-meter.json` | `usage-meter-desktop.json` |
-| Host | DSH 0.1 / web profile | **DSH 0.2 desktop** (web works too) |
+| Host | DSH 0.1 / web profile | **DSH 0.1 web and DSH 0.2 desktop** |
 
 Data directories and filenames are deliberately separate, so installing both never
 clobbers the other's config or ledger.
