@@ -21,7 +21,7 @@ DeepSeek Harness（DSH）的**实时用量 / 费用 / 余额计量插件**。
 | 数据目录 | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
 | 配置文件 | `usage-meter.json` | `usage-meter-desktop.json` |
 
-- **3.1.0+ 两代宿主都能跑。** 必需依赖只留 `sessionProjections`，`webServer` 走可选的子 fiber 解析，设置文件自己管 —— 所以 0.1 有 `ctx.settings.register`、0.2 删了它，都跟它没关系。
+- **3.1.0+ 两代宿主都能跑。** 不用按 DSH 代际挑版本：同一个包装在 DSH 0.1 和 0.2 上都行，升级也不丢账本和定价。
 - **2.0.x 仍在调 `ctx.settings.register`**，DSH 0.2 已经删掉这个 API —— 装在桌面版上会报 `1 entry did not activate`，界面上什么都不出来。
 - 插件 id、数据目录、配置文件名三处都刻意错开，两个一起装也不会互相覆盖配置和账本。
 - 3.1.0 的完整改动清单、安装步骤、截图：见 [`desktop/README.zh-CN.md`](desktop/README.zh-CN.md)

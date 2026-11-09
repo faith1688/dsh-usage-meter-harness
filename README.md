@@ -22,9 +22,8 @@ DSH generation — one package, both hosts.**
 | Data directory | `$DSH_HOME/usage-meter/` | `$DSH_HOME/usage-meter-desktop/` |
 | Config file | `usage-meter.json` | `usage-meter-desktop.json` |
 
-- **3.1.0+ runs on both hosts.** It declares only `sessionProjections` as required,
-  resolves `webServer` through an optional child fiber, and owns its settings file, so
-  neither DSH 0.1's `ctx.settings.register` nor DSH 0.2's removal of it matters.
+- **3.1.0+ runs on both hosts.** No version to pick by DSH generation: the same
+  package installs on DSH 0.1 and DSH 0.2, and upgrading keeps your ledger and pricing.
 - **2.0.x still calls `ctx.settings.register`**, which DSH 0.2 removed — on the desktop
   app it shows `1 entry did not activate` and nothing renders.
 - Plugin ids, data directories and config filenames are deliberately different, so

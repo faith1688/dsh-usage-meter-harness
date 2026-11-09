@@ -10,45 +10,16 @@ the official DeepSeek models **and** any custom model registered in DSH.
 
 ## 3.1.0 — one build, both DSH generations
 
-In one line: **the same package installs and runs on DSH 0.1 (web profile) and DSH 0.2
-(desktop) — nothing to choose, no per-host patch.**
+**The same package installs and runs on DSH 0.1 (web profile) and DSH 0.2 (desktop).**
+No version to pick, no per-host build.
 
-Before 3.1.0 each build hard-required a service the other generation lacked:
-
-| `inject` | 2.0.x | 3.0.0 | 3.1.0 |
-| --- | --- | --- | --- |
-| declared | `['settings','sessionProjections']` | `['sessionProjections','webServer']` | `['sessionProjections']` |
-| DSH 0.1 (web) | ✅ | ⚠️ works, but only through a probe | ✅ |
-| DSH 0.2 (desktop) | ❌ `ctx.settings.register` is gone | ✅ | ✅ |
-
-How one build covers both:
-
-- **`sessionProjections` is the only required service.** Both generations provide it;
-  it carries the readout.
-- **`webServer` is optional, resolved through a child fiber.** `ctx.inject(['webServer'], …)`
-  activates when the service appears and stays pending when a composition never
-  provides it. Routes registered before that point are queued and flushed in order, so
-  the plugin mounts on a host that resolves un-injected services (0.1) *and* on one
-  that does not (0.2). A composition with no `webServer` at all runs without HTTP
-  routes and keeps the readout.
-- **The host settings service is not used.** `src/settings-scope.ts` owns a JSON file
-  in the plugin's data directory, so 0.1's `ctx.settings.register` and 0.2's
-  `SettingsForms` are equally irrelevant. The settings UI rides the `settings.section`
-  client slot, which both generations declare.
-- **The client half is generation-agnostic.** `inject = ['slots']`, `dsh.client.inject`
-  names `dsh-client-ui-conversation` + `dsh-client-locale` (identical in both hosts),
-  and `useProjection` / `useChat` are probed with fallbacks.
-
-Verified on this machine: on DSH 0.1.5-rc.1 the plugin mounts, every
-`/api/usage-meter/*` route answers 200, and `__DSH_BOOT__` lists
-`dsh-usage-meter-desktop/client.js` in the application batch (bundle served,
-321 076 bytes). On DSH 0.2 the same package serves the desktop UI as before.
-`scripts/test-host-matrix.mjs` reproduces the three host shapes against real cordis —
-service already present, service arriving late, service never provided — and every
-case must pass.
-
-The 3.0.0 notes below still describe what changed against 2.0.39; they apply to this
-build too.
+- **Install the same thing anywhere.** `dsh-usage-meter-desktop` 3.1.0 is the package
+  for both host generations.
+- **Upgrading is a drop-in replacement.** Plugin id, data directory and config filename
+  are unchanged, so the ledger, your pricing and your settings all survive.
+- **Hosts without an HTTP server are fine.** The readout, accounting and settings UI
+  keep working; the `/api/usage-meter/*` endpoints are simply not registered, and
+  nothing warns.
 
 | | 2.0.x (web build) | 3.x (this build) |
 | --- | --- | --- |
