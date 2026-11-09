@@ -32,73 +32,48 @@ No version to pick, no per-host build.
 Data directories and filenames are deliberately separate, so installing both never
 clobbers the other's config or ledger.
 
-### What changed in 3.0.0 vs 2.0.39
+### What changed in 3.0.0
 
-**1. DSH 0.2 support (without this it does not start)**
+**1. Runs on DSH 0.2 (the desktop app)**
 
-- DSH 0.2 removed `ctx.settings.register`, replacing it with presentation-only
-  `SettingsForms`. The old call threw
-  `TypeError: ctx.settings.register is not a function` and the whole plugin reported
-  `1 entry did not activate`. 3.0.0 ships its own file-backed settings scope
-  (`src/settings-scope.ts`) with 0.1 semantics: schema defaults ← composition base ←
-  persisted user values.
-- DSH 0.2 no longer resolves a service that was not injected. The old
-  `ctx.get('webServer')` probe reads as absent on 0.2, so every
-  `/api/usage-meter/*` route silently disappeared and the client had no data channel.
-  3.0.0 makes `webServer` a required inject.
+The desktop app dropped the settings API the old build relied on, so it never started.
+3.0.0 brings its own settings storage and just works on both apps.
 
-**2. New: import pricing from other billing plugins on this machine**
+**2. Import pricing from other billing plugins on this machine**
 
 Next to "Export billing config / Import billing config" in a model editor there is now
 a third button, **"Import pricing from other plugins"**:
 
 - It scans installed billing plugins (currently `dsh-cost-meter`) for every model price
   they know about.
-- Rows are ranked by model-name similarity (prefix 0.45 + bigram Dice 0.35 + token
-  Jaccard 0.20), so the closest match is on top instead of you hunting for it.
-- "Use this" writes into **the model this card owns** (not the provider from the
-  source); the source currency is converted to the target model's currency at the
-  current rate.
+- Rows are ranked by model-name similarity, so the closest match is on top instead of
+  you hunting for it.
+- "Use this" writes into **the model this card owns**; the source currency is converted
+  to the target model's currency at the current rate.
 
-**3. Peak/off-peak windows travel with the price (correctness fix)**
+**3. Peak/off-peak windows travel with the price**
 
-Importing unit prices without the schedule is always wrong: if the source plugin puts
-peak hours at different clock times and we keep our own windows, the same price gets
-applied in the wrong hours. 3.0.0 carries `peakWindows` / `peakDays` across and converts
-cost-meter's **UTC hours** into Beijing-time minutes (`+8`, cross-midnight clamped to
-24:00).
+Importing a peak price without the hours it applies to puts the right number in the
+wrong part of the day. 3.0.0 carries the windows and weekdays across, and converts the
+source's UTC hours to Beijing time.
 
-**4. Fixed in 3.0.0: no more invented peak/off-peak**
+**4. Flat pricing no longer shows as peak/off-peak**
 
-Symptom: Kimi-K3's peak and off-peak numbers were identical (20/20, 2/2, 100/100), yet
-it showed a "peak/off-peak" badge with the peak switch on.
+Prices used to be judged one config at a time: as soon as any model had peak pricing,
+every model wore the badge — even when the peak and off-peak numbers were identical.
+Now it is decided per row: three identical values mean flat pricing, no badge, no peak
+fields written, and previously imported fake peak pricing heals itself the next time
+the config loads.
 
-Two root causes:
-
-1. The source plugin's `config.peakWindows` is **config-wide**: as soon as any single
-   model has peak pricing, the field exists. The old code applied it to every row, so
-   models without peak pricing inherited the badge.
-2. The old code only checked whether a `peak` field existed, never whether its numbers
-   differed. Identical peak and off-peak values were still treated as peak pricing.
-
-Fix: decide **per row** — three identical values mean `peak = null` and the window is
-cleared too. The server applies the same test when writing, so it no longer emits
-`peak/offPeak/peakWindows/peakDays` for a flat price. Loading an existing config also
-normalises stale data, so previously imported fake peak pricing heals itself.
-
-Measured on this machine (832 candidates): 832 rows had peak pricing before the fix;
-after it, **only 9 do**, all DeepSeek official models (`deepseek-flash`,
-`deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, plus their opencode-go
+On this machine 832 candidate rows all reported peak pricing before; **9 do now**, all
+DeepSeek official models (`deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`,
+`deepseek-v4.1-flash`, plus their opencode-go
 channel). Kimi, Qwen, Gemini and the rest are now flat.
 
 **5. Price edits take effect immediately**
 
-Previously you had to collapse and reopen the capsule to see a new unit price. Two root
-causes: the override kept its own stale row table (editing prices updated `prices` but
-never the rows), and the host projection only recomputes on session events, which a
-price edit does not produce. Fix: invalidate the row table when only prices change, plus
-a new `GET /api/usage-meter/pricing` that reads the live effective price directly and is
-layered over the projection on the client.
+Clicking "Use this" used to leave the capsule showing the old price until you collapsed
+and reopened it. The new price now shows up right away.
 
 **6. Settings page rework + export in the capsule drawer**
 
@@ -111,17 +86,15 @@ layered over the projection on the client.
 
 ## Install
 
-This package is the **desktop build (3.0.0)**. It is installed from a local tarball into
-the `desktop` profile — it is not fetched from the npm registry, and it does not touch
-the web build.
+This package is the **desktop build (3.1.0)**. Install it into the `desktop` profile:
 
-**1. Build the tarball (or use the one shipped in the release assets):**
+**1. Build the tarball (or use the one in the release assets):**
 
 ```bash
 cd desktop
 npm install          # esbuild + typescript
 npm run bundle       # tsc for the host half, then esbuild for lib/client.js
-npm pack             # -> dsh-usage-meter-desktop-3.0.0.tgz
+npm pack             # -> dsh-usage-meter-desktop-3.1.0.tgz
 ```
 
 **2. Drop it into the desktop profile and point the profile at it:**
